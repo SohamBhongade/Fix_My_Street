@@ -7,7 +7,13 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>Fix My Street</string>
+	<string>FixMyStreet AI</string>
+	<key>NSCameraUsageDescription</key>
+	<string>FixMyStreet uses your camera to capture photos of urban issues for AI analysis.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>FixMyStreet needs access to your photo library to attach images of urban issues.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>FixMyStreet attaches your current location to each report so volunteers can find the issue.</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>

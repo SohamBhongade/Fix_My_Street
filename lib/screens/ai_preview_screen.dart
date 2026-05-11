@@ -1,0 +1,558 @@
+import 'dart:convert';
+import 'dart:io';
+import 'dart:typed_data';
+
+import 'package:flutter/material.dart';
+
+import '../models/ai_analysis_result.dart';
+import '../models/report_model.dart';
+import '../services/ai_service.dart' show AIService, GroqException;
+import '../services/database_service.dart';
+import '../services/location_service.dart';
+import '../widgets/glass_card.dart';
+import '../widgets/severity_indicator.dart';
+
+const List<String> _manualCategories = [
+  'Pothole',
+  'Road Crack',
+  'Streetlight',
+  'Garbage / Litter',
+  'Graffiti',
+  'Damaged Signage',
+  'Water Leak',
+  'Other',
+];
+
+class AIPreviewScreen extends StatefulWidget {
+  final Uint8List imageBytes;
+  final String imagePath;
+
+  const AIPreviewScreen({
+    super.key,
+    required this.imageBytes,
+    required this.imagePath,
+  });
+
+  @override
+  State<AIPreviewScreen> createState() => _AIPreviewScreenState();
+}
+
+class _AIPreviewScreenState extends State<AIPreviewScreen> {
+  AIAnalysisResult? _result;
+  ResolvedLocation? _location;
+  String? _error;
+  bool _busy = true;
+  bool _submitting = false;
+  String? _manualCategoryOverride;
+
+  @override
+  void initState() {
+    super.initState();
+    _run();
+  }
+
+  Future<void> _run() async {
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+
+    try {
+      final results = await Future.wait([
+        AIService.instance.analyzeImage(File(widget.imagePath)),
+        LocationService.instance.getCurrentLocation(),
+      ]);
+      if (!mounted) return;
+      setState(() {
+        _result = results[0] as AIAnalysisResult;
+        _location = results[1] as ResolvedLocation;
+        _busy = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = e is GroqException ? e.userMessage : e.toString();
+        _busy = false;
+      });
+    }
+  }
+
+  Future<void> _submit() async {
+    final result = _result;
+    final loc = _location;
+    if (result == null || loc == null) return;
+
+    setState(() => _submitting = true);
+    try {
+      final category = _manualCategoryOverride ?? result.category;
+      final priority = ReportPriority.fromSeverity(result.severity);
+      final report = ReportModel(
+        category: category,
+        severity: result.severity,
+        priority: priority,
+        description: result.description,
+        latitude: loc.latitude,
+        longitude: loc.longitude,
+        address: loc.address,
+        imageBase64: base64Encode(widget.imageBytes),
+        createdAt: DateTime.now(),
+      );
+      await DatabaseService.instance.saveReport(report);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Report submitted. Thank you!')),
+      );
+      Navigator.of(context)..pop()..pop();
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _submitting = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Submission failed: $e')),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      extendBodyBehindAppBar: true,
+      appBar: AppBar(
+        title: const Text(
+          'REPORT PREVIEW',
+          style: TextStyle(
+            fontSize: 15,
+            fontWeight: FontWeight.w800,
+            letterSpacing: 2.5,
+            color: Colors.white,
+          ),
+        ),
+        centerTitle: true,
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+      ),
+      body: Container(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [Color(0xFF0A0A1F), Color(0xFF050510)],
+          ),
+        ),
+        child: SafeArea(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                GlassCard(
+                  padding: const EdgeInsets.all(8),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(14),
+                    child: Image.file(
+                      File(widget.imagePath),
+                      height: 240,
+                      width: double.infinity,
+                      fit: BoxFit.cover,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                if (_busy) _buildLoading(),
+                if (_error != null) _buildError(_error!),
+                if (!_busy && _error == null && _result != null) ...[
+                  _buildAIAutoClassification(_result!),
+                  const SizedBox(height: 18),
+                  _buildManualDropdown(_result!),
+                  const SizedBox(height: 18),
+                  _buildStatGrid(_result!),
+                  const SizedBox(height: 18),
+                  if (_location != null) _buildLocationCard(_location!),
+                  const SizedBox(height: 22),
+                  _SubmitButton(
+                    label: _submitting ? 'SUBMITTING…' : 'SUBMIT REPORT',
+                    onTap: _submitting ? null : _submit,
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildLoading() {
+    return GlassCard(
+      padding: const EdgeInsets.all(28),
+      child: Column(
+        children: [
+          const CircularProgressIndicator(color: Color(0xFF00E5FF)),
+          const SizedBox(height: 16),
+          Text(
+            'Groq is analyzing your photo…',
+            style: TextStyle(
+              color: Colors.white.withValues(alpha: 0.85),
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'Also resolving your location.',
+            style: TextStyle(
+              color: Colors.white.withValues(alpha: 0.6),
+              fontSize: 12,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildError(String message) {
+    return GlassCard(
+      borderColor: const Color(0x66FF5252),
+      padding: const EdgeInsets.all(20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Row(
+            children: [
+              Icon(Icons.error_outline_rounded, color: Color(0xFFFF5252)),
+              SizedBox(width: 8),
+              Text(
+                'Something went wrong',
+                style: TextStyle(
+                  color: Color(0xFFFF5252),
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            message,
+            style: TextStyle(
+              color: Colors.white.withValues(alpha: 0.8),
+              fontSize: 13,
+            ),
+          ),
+          const SizedBox(height: 12),
+          Align(
+            alignment: Alignment.centerRight,
+            child: TextButton.icon(
+              onPressed: _run,
+              icon: const Icon(Icons.refresh_rounded, color: Color(0xFF00E5FF)),
+              label: const Text(
+                'Retry',
+                style: TextStyle(color: Color(0xFF00E5FF)),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildAIAutoClassification(AIAnalysisResult r) {
+    final severityColor = SeverityIndicator.colorFor(r.severity);
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: const Color(0xFF14060A),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFFFF5252), width: 1),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'AI AUTO CLASSIFICATION',
+            style: TextStyle(
+              color: Colors.white.withValues(alpha: 0.55),
+              fontSize: 11,
+              letterSpacing: 2,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 10),
+          Text(
+            '${r.category} detected',
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 18,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            '${r.severity}/10 severity',
+            style: TextStyle(
+              color: severityColor,
+              fontSize: 14,
+              fontWeight: FontWeight.w700,
+              shadows: [
+                Shadow(color: severityColor.withValues(alpha: 0.5), blurRadius: 8),
+              ],
+            ),
+          ),
+          const SizedBox(height: 12),
+          Text(
+            r.description,
+            style: TextStyle(
+              color: Colors.white.withValues(alpha: 0.8),
+              fontSize: 13,
+              height: 1.45,
+              fontStyle: FontStyle.italic,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildManualDropdown(AIAnalysisResult r) {
+    final aiCategory = r.category;
+    final initialValue = _manualCategoryOverride ??
+        (_manualCategories.contains(aiCategory) ? aiCategory : 'Other');
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'MANUAL CLASSIFICATION',
+          style: TextStyle(
+            color: Colors.white.withValues(alpha: 0.55),
+            fontSize: 11,
+            letterSpacing: 2,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        const SizedBox(height: 8),
+        DropdownButtonFormField<String>(
+          initialValue: initialValue,
+          dropdownColor: const Color(0xFF0A0A1F),
+          iconEnabledColor: const Color(0xFF00E5FF),
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 14,
+            fontWeight: FontWeight.w600,
+          ),
+          decoration: InputDecoration(
+            filled: true,
+            fillColor: const Color(0xFF0A0A1F),
+            contentPadding:
+                const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide(
+                color: Colors.white.withValues(alpha: 0.15),
+              ),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: const BorderSide(color: Color(0xFF00E5FF), width: 1.5),
+            ),
+          ),
+          items: _manualCategories
+              .map((c) => DropdownMenuItem(value: c, child: Text(c)))
+              .toList(),
+          onChanged: (v) {
+            if (v == null) return;
+            setState(() => _manualCategoryOverride = v);
+          },
+        ),
+      ],
+    );
+  }
+
+  Widget _buildStatGrid(AIAnalysisResult r) {
+    final priority = ReportPriority.fromSeverity(r.severity);
+    final priorityColor = SeverityIndicator.colorFor(r.severity);
+    final severityColor = SeverityIndicator.colorFor(r.severity);
+
+    return Row(
+      children: [
+        Expanded(
+          child: _StatTile(
+            label: 'PRIORITY',
+            value: priority.label.toUpperCase(),
+            color: priorityColor,
+          ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: _StatTile(
+            label: 'SEVERITY',
+            value: _busy ? 'PENDING' : '${r.severity}/10',
+            color: _busy ? Colors.white.withValues(alpha: 0.5) : severityColor,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildLocationCard(ResolvedLocation loc) {
+    return GlassCard(
+      borderColor: const Color(0x66B388FF),
+      padding: const EdgeInsets.all(18),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _LocationRow(
+            icon: Icons.gps_fixed_rounded,
+            label: 'GPS COORDINATES',
+            value:
+                '${loc.latitude.toStringAsFixed(5)}, ${loc.longitude.toStringAsFixed(5)}',
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 12),
+            child: Container(
+              height: 1,
+              color: Colors.white.withValues(alpha: 0.08),
+            ),
+          ),
+          _LocationRow(
+            icon: Icons.place_rounded,
+            label: 'STREET NAME',
+            value: loc.address,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _StatTile extends StatelessWidget {
+  final String label;
+  final String value;
+  final Color color;
+
+  const _StatTile({
+    required this.label,
+    required this.value,
+    required this.color,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GlassCard(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            style: TextStyle(
+              color: Colors.white.withValues(alpha: 0.55),
+              fontSize: 11,
+              letterSpacing: 2,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            value,
+            style: TextStyle(
+              color: color,
+              fontSize: 20,
+              fontWeight: FontWeight.w800,
+              letterSpacing: 1,
+              shadows: [
+                Shadow(color: color.withValues(alpha: 0.55), blurRadius: 10),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _LocationRow extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final String value;
+
+  const _LocationRow({
+    required this.icon,
+    required this.label,
+    required this.value,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Icon(icon, color: const Color(0xFFB388FF), size: 20),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                label,
+                style: TextStyle(
+                  color: Colors.white.withValues(alpha: 0.55),
+                  fontSize: 11,
+                  letterSpacing: 2,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                value,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _SubmitButton extends StatelessWidget {
+  final String label;
+  final VoidCallback? onTap;
+
+  const _SubmitButton({required this.label, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final disabled = onTap == null;
+    return AnimatedOpacity(
+      opacity: disabled ? 0.5 : 1,
+      duration: const Duration(milliseconds: 150),
+      child: GestureDetector(
+        onTap: onTap,
+        child: Container(
+          height: 56,
+          decoration: BoxDecoration(
+            color: const Color(0xFF00E5FF),
+            borderRadius: BorderRadius.circular(16),
+            boxShadow: const [
+              BoxShadow(color: Color(0x6600E5FF), blurRadius: 22),
+            ],
+          ),
+          child: Center(
+            child: Text(
+              label,
+              style: const TextStyle(
+                color: Colors.black,
+                fontWeight: FontWeight.w800,
+                fontSize: 15,
+                letterSpacing: 1.5,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
