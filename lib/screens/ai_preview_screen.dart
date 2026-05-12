@@ -12,16 +12,35 @@ import '../services/location_service.dart';
 import '../widgets/glass_card.dart';
 import '../widgets/severity_indicator.dart';
 
-const List<String> _manualCategories = [
-  'Pothole',
-  'Road Crack',
-  'Streetlight',
-  'Garbage / Litter',
-  'Graffiti',
-  'Damaged Signage',
-  'Water Leak',
-  'Other',
-];
+const Map<String, int> _categorySeverity = {
+  'Exposed Wiring': 10,
+  'Broken Pipelines': 10,
+  'Potholes': 8,
+  'Traffic Signal Malfunction': 8,
+  'Broken Guardrails': 7,
+  'Broken Street Lights': 6,
+  'Water Accumulation': 5,
+  'Cracked Sidewalks': 5,
+  'Illegal Dumping': 5,
+  'Overflowing Bins': 4,
+  'Overgrown Vegetation': 4,
+  'Broken Signs': 3,
+  'Faded Road Markings': 3,
+  'Litter Accumulation': 2,
+  'Graffiti': 1,
+};
+
+Color _priorityColorFor(int severity) {
+  if (severity >= 8) return const Color(0xFFFF1744);
+  if (severity >= 4) return const Color(0xFFFF9100);
+  return const Color(0xFF00E676);
+}
+
+String _priorityLabelFor(int severity) {
+  if (severity >= 8) return 'CRITICAL';
+  if (severity >= 4) return 'MODERATE';
+  return 'MINOR';
+}
 
 class AIPreviewScreen extends StatefulWidget {
   final Uint8List imageBytes;
@@ -44,6 +63,10 @@ class _AIPreviewScreenState extends State<AIPreviewScreen> {
   bool _busy = true;
   bool _submitting = false;
   String? _manualCategoryOverride;
+
+  int get _effectiveSeverity => _manualCategoryOverride != null
+      ? _categorySeverity[_manualCategoryOverride]!
+      : (_result?.severity ?? 0);
 
   @override
   void initState() {
@@ -85,10 +108,11 @@ class _AIPreviewScreenState extends State<AIPreviewScreen> {
     setState(() => _submitting = true);
     try {
       final category = _manualCategoryOverride ?? result.category;
-      final priority = ReportPriority.fromSeverity(result.severity);
+      final severity = _effectiveSeverity;
+      final priority = ReportPriority.fromSeverity(severity);
       final report = ReportModel(
         category: category,
-        severity: result.severity,
+        severity: severity,
         priority: priority,
         description: result.description,
         latitude: loc.latitude,
@@ -184,27 +208,30 @@ class _AIPreviewScreenState extends State<AIPreviewScreen> {
   Widget _buildLoading() {
     return GlassCard(
       padding: const EdgeInsets.all(28),
-      child: Column(
-        children: [
-          const CircularProgressIndicator(color: Color(0xFF00E5FF)),
-          const SizedBox(height: 16),
-          Text(
-            'Groq is analyzing your photo…',
-            style: TextStyle(
-              color: Colors.white.withValues(alpha: 0.85),
-              fontSize: 14,
-              fontWeight: FontWeight.w600,
+      child: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const CircularProgressIndicator(color: Color(0xFF00E5FF)),
+            const SizedBox(height: 16),
+            const Text(
+              'AI is analyzing your picture',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 16,
+                fontWeight: FontWeight.w700,
+              ),
             ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            'Also resolving your location.',
-            style: TextStyle(
-              color: Colors.white.withValues(alpha: 0.6),
-              fontSize: 12,
+            const SizedBox(height: 4),
+            Text(
+              'Please wait...',
+              style: TextStyle(
+                color: Colors.white.withValues(alpha: 0.6),
+                fontSize: 13,
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -306,15 +333,28 @@ class _AIPreviewScreenState extends State<AIPreviewScreen> {
               fontStyle: FontStyle.italic,
             ),
           ),
+          if (_manualCategoryOverride != null) ...[
+            const SizedBox(height: 10),
+            Text(
+              'Manual override: $_manualCategoryOverride selected with $_effectiveSeverity/10 severity.',
+              style: const TextStyle(
+                color: Color(0xFF00E5FF),
+                fontSize: 13,
+                height: 1.45,
+                fontStyle: FontStyle.italic,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
         ],
       ),
     );
   }
 
   Widget _buildManualDropdown(AIAnalysisResult r) {
-    final aiCategory = r.category;
+    final categories = _categorySeverity.keys.toList();
     final initialValue = _manualCategoryOverride ??
-        (_manualCategories.contains(aiCategory) ? aiCategory : 'Other');
+        (categories.contains(r.category) ? r.category : categories.first);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -331,7 +371,7 @@ class _AIPreviewScreenState extends State<AIPreviewScreen> {
         const SizedBox(height: 8),
         DropdownButtonFormField<String>(
           initialValue: initialValue,
-          dropdownColor: const Color(0xFF0A0A1F),
+          dropdownColor: const Color(0xFF14262C),
           iconEnabledColor: const Color(0xFF00E5FF),
           style: const TextStyle(
             color: Colors.white,
@@ -340,7 +380,7 @@ class _AIPreviewScreenState extends State<AIPreviewScreen> {
           ),
           decoration: InputDecoration(
             filled: true,
-            fillColor: const Color(0xFF0A0A1F),
+            fillColor: const Color(0xFF14262C),
             contentPadding:
                 const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
             enabledBorder: OutlineInputBorder(
@@ -354,7 +394,7 @@ class _AIPreviewScreenState extends State<AIPreviewScreen> {
               borderSide: const BorderSide(color: Color(0xFF00E5FF), width: 1.5),
             ),
           ),
-          items: _manualCategories
+          items: categories
               .map((c) => DropdownMenuItem(value: c, child: Text(c)))
               .toList(),
           onChanged: (v) {
@@ -367,25 +407,24 @@ class _AIPreviewScreenState extends State<AIPreviewScreen> {
   }
 
   Widget _buildStatGrid(AIAnalysisResult r) {
-    final priority = ReportPriority.fromSeverity(r.severity);
-    final priorityColor = SeverityIndicator.colorFor(r.severity);
-    final severityColor = SeverityIndicator.colorFor(r.severity);
+    final severity = _effectiveSeverity;
+    final tileColor = _priorityColorFor(severity);
 
     return Row(
       children: [
         Expanded(
           child: _StatTile(
             label: 'PRIORITY',
-            value: priority.label.toUpperCase(),
-            color: priorityColor,
+            value: _priorityLabelFor(severity),
+            color: tileColor,
           ),
         ),
         const SizedBox(width: 12),
         Expanded(
           child: _StatTile(
             label: 'SEVERITY',
-            value: _busy ? 'PENDING' : '${r.severity}/10',
-            color: _busy ? Colors.white.withValues(alpha: 0.5) : severityColor,
+            value: _busy ? 'PENDING' : '$severity/10',
+            color: _busy ? Colors.white.withValues(alpha: 0.5) : tileColor,
           ),
         ),
       ],
