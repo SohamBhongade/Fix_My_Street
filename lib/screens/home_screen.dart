@@ -1,8 +1,23 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_map/flutter_map.dart';
+import 'package:latlong2/latlong.dart';
 
-import '../widgets/glass_card.dart';
+import '../models/report_model.dart';
+import '../services/database_service.dart';
+import '../widgets/severity_indicator.dart';
 import 'camera_screen.dart';
+import 'issue_detail_screen.dart';
+import 'map_explore_screen.dart';
 import 'volunteer_screen.dart';
+
+const Color _kBackground = Color(0xFF000000);
+const Color _kSurface = Color(0xFF13181F);
+const Color _kCyan = Color(0xFF00E5FF);
+const Color _kTextPrimary = Color(0xFFFFFFFF);
+const Color _kTextSecondary = Color(0xFF9CA3AF);
+
+const LatLng _kRakCenter = LatLng(25.7911, 55.9432);
+const double _kRakZoom = 11.0;
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -12,249 +27,336 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
+  List<ReportModel> _reports = const [];
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchReports();
+  }
+
+  Future<void> _fetchReports() async {
+    try {
+      final reports = await DatabaseService.instance.fetchReports();
+      if (!mounted) return;
+      setState(() {
+        _reports = reports;
+        _loading = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _loading = false);
+    }
+  }
+
+  void _navigate(Widget page) {
+    Navigator.of(context).push(MaterialPageRoute(builder: (_) => page));
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      extendBodyBehindAppBar: true,
-      body: Stack(
-        fit: StackFit.expand,
-        children: [
-          const _AuroraBackground(),
-          SafeArea(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(20, 32, 20, 24),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  _buildHeader(),
-                  const SizedBox(height: 28),
-                  Expanded(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        GlassCard(
-                          padding: const EdgeInsets.all(22),
-                          onTap: () => _navigate(context, const CameraScreen()),
-                          child: _ActionTile(
-                            icon: Icons.camera_alt_rounded,
-                            accent: const Color(0xFF00E5FF),
-                            title: 'Report an Issue',
-                            subtitle:
-                                'Snap a photo. AI analyzes severity and category in seconds.',
-                          ),
-                        ),
-                        const SizedBox(height: 18),
-                        GlassCard(
-                          padding: const EdgeInsets.all(22),
-                          borderColor: const Color(0x66B388FF),
-                          onTap: () =>
-                              _navigate(context, const VolunteerScreen()),
-                          child: _ActionTile(
-                            icon: Icons.volunteer_activism_rounded,
-                            accent: const Color(0xFFB388FF),
-                            title: 'Volunteer Console',
-                            subtitle:
-                                'Browse open reports, prioritize critical fixes, mark them resolved.',
-                          ),
-                        ),
-                      ],
+      backgroundColor: _kBackground,
+      body: SafeArea(
+        child: Column(
+          children: [
+            const _BrandHeader(),
+            Container(
+              height: 0.5,
+              color: _kCyan.withValues(alpha: 0.5),
+            ),
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  children: [
+                    Expanded(
+                      child: _MapHeroCard(
+                        reports: _reports,
+                        loading: _loading,
+                        onExplore: () => _navigate(const MapExploreScreen()),
+                        onMarkerTap: (r) =>
+                            _navigate(IssueDetailScreen(report: r)),
+                      ),
                     ),
-                  ),
-                  _buildFooter(),
-                ],
+                    const SizedBox(height: 12),
+                    SizedBox(
+                      height: 88,
+                      child: _ActionTile(
+                        icon: Icons.camera_alt_rounded,
+                        title: 'Report an Issue',
+                        subtitle:
+                            'Snap a photo. AI analyzes severity and category instantly.',
+                        onTap: () => _navigate(const CameraScreen()),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    SizedBox(
+                      height: 88,
+                      child: _ActionTile(
+                        icon: Icons.volunteer_activism_rounded,
+                        title: 'Volunteer Console',
+                        subtitle:
+                            'Browse open reports and mark critical fixes resolved.',
+                        onTap: () => _navigate(const VolunteerScreen()),
+                      ),
+                    ),
+                  ],
+                ),
               ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _BrandHeader extends StatelessWidget {
+  const _BrandHeader();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      color: _kBackground,
+      padding: const EdgeInsets.fromLTRB(20, 16, 20, 16),
+      child: Row(
+        children: [
+          const Icon(
+            Icons.location_on_rounded,
+            color: _kCyan,
+            size: 32,
+          ),
+          const SizedBox(width: 14),
+          const Text(
+            'FIXMYSTREET AI',
+            style: TextStyle(
+              color: _kTextPrimary,
+              fontSize: 24,
+              fontWeight: FontWeight.w800,
+              letterSpacing: 1.5,
             ),
           ),
         ],
       ),
     );
   }
+}
 
-  Widget _buildHeader() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
+class _MapHeroCard extends StatelessWidget {
+  final List<ReportModel> reports;
+  final bool loading;
+  final VoidCallback onExplore;
+  final ValueChanged<ReportModel> onMarkerTap;
+
+  const _MapHeroCard({
+    required this.reports,
+    required this.loading,
+    required this.onExplore,
+    required this.onMarkerTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: _kSurface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: _kCyan, width: 1),
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(15),
+        child: Stack(
+          fit: StackFit.expand,
           children: [
-            Container(
-              width: 44,
-              height: 44,
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(14),
-                gradient: const LinearGradient(
-                  colors: [Color(0xFF00E5FF), Color(0xFFB388FF)],
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                ),
-                boxShadow: const [
-                  BoxShadow(
-                    color: Color(0x6600E5FF),
-                    blurRadius: 20,
-                  ),
-                ],
+            FlutterMap(
+              options: const MapOptions(
+                initialCenter: _kRakCenter,
+                initialZoom: _kRakZoom,
+                interactionOptions:
+                    InteractionOptions(flags: InteractiveFlag.none),
               ),
-              child: const Icon(Icons.eco_rounded, color: Colors.white),
+              children: [
+                TileLayer(
+                  urlTemplate:
+                      'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
+                  subdomains: const ['a', 'b', 'c', 'd'],
+                ),
+                if (!loading && reports.isNotEmpty)
+                  MarkerLayer(
+                    markers: reports.map((r) {
+                      final dotSize = SeverityDot.sizeFor(r.severity);
+                      return Marker(
+                        point: LatLng(r.latitude, r.longitude),
+                        width: dotSize,
+                        height: dotSize,
+                        child: GestureDetector(
+                          behavior: HitTestBehavior.opaque,
+                          onTap: () => onMarkerTap(r),
+                          child: SeverityDot(severity: r.severity),
+                        ),
+                      );
+                    }).toList(),
+                  ),
+              ],
             ),
-            const SizedBox(width: 12),
-            const Text(
-              'FixMyStreet AI',
-              style: TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.w800,
-                fontSize: 22,
-                letterSpacing: 0.4,
+            if (loading)
+              const Align(
+                alignment: Alignment.center,
+                child: SizedBox(
+                  width: 22,
+                  height: 22,
+                  child: CircularProgressIndicator(
+                    color: _kCyan,
+                    strokeWidth: 2,
+                  ),
+                ),
+              ),
+            // Bottom CTA strip — sits above the map; only this strip opens
+            // the full Explore Map so individual marker taps still work.
+            Align(
+              alignment: Alignment.bottomCenter,
+              child: Material(
+                color: Colors.transparent,
+                child: InkWell(
+                  onTap: onExplore,
+                  child: Container(
+                    decoration: const BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: [Color(0x00FFFFFF), Color(0xF2FFFFFF)],
+                      ),
+                    ),
+                    padding: const EdgeInsets.fromLTRB(18, 40, 18, 16),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Text(
+                                'EXPLORE LIVE MAP',
+                                style: TextStyle(
+                                  color: _kBackground,
+                                  fontWeight: FontWeight.w800,
+                                  fontSize: 17,
+                                  letterSpacing: 1.6,
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                loading
+                                    ? 'Loading reports across Ras Al Khaimah…'
+                                    : reports.isEmpty
+                                        ? 'Tap to view all reports across Ras Al Khaimah.'
+                                        : '${reports.length} live reports · tap a dot for details.',
+                                style: TextStyle(
+                                  color: Colors.black.withValues(alpha: 0.55),
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const Icon(
+                          Icons.arrow_forward_rounded,
+                          color: _kCyan,
+                          size: 22,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
               ),
             ),
           ],
         ),
-        const SizedBox(height: 12),
-        Text(
-          'Smart urban maintenance for Ras Al Khaimah.',
-          style: TextStyle(
-            color: Colors.white.withValues(alpha: 0.72),
-            fontSize: 14,
-            letterSpacing: 0.3,
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildFooter() {
-    return Center(
-      child: Text(
-        'Powered by Gemini · MongoDB Atlas',
-        style: TextStyle(
-          color: Colors.white.withValues(alpha: 0.45),
-          fontSize: 11,
-          letterSpacing: 1.4,
-        ),
       ),
-    );
-  }
-
-  void _navigate(BuildContext context, Widget page) {
-    Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => page),
     );
   }
 }
 
 class _ActionTile extends StatelessWidget {
   final IconData icon;
-  final Color accent;
   final String title;
   final String subtitle;
+  final VoidCallback onTap;
 
   const _ActionTile({
     required this.icon,
-    required this.accent,
     required this.title,
     required this.subtitle,
+    required this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.center,
-      children: [
-        Container(
-          width: 54,
-          height: 54,
+    return Material(
+      color: _kSurface,
+      borderRadius: BorderRadius.circular(16),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(16),
+        onTap: onTap,
+        child: Container(
           decoration: BoxDecoration(
-            color: accent.withValues(alpha: 0.18),
             borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: accent.withValues(alpha: 0.7)),
-            boxShadow: [
-              BoxShadow(
-                color: accent.withValues(alpha: 0.45),
-                blurRadius: 16,
-              ),
-            ],
+            border: Border.all(color: _kCyan, width: 1),
           ),
-          child: Icon(icon, color: accent, size: 28),
-        ),
-        const SizedBox(width: 16),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              Text(
-                title,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w700,
-                  fontSize: 17,
+              Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  color: Colors.transparent,
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: _kCyan, width: 1),
+                ),
+                child: Icon(icon, color: _kCyan, size: 22),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      title,
+                      style: const TextStyle(
+                        color: _kTextPrimary,
+                        fontWeight: FontWeight.w800,
+                        fontSize: 17,
+                        letterSpacing: 0.4,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      subtitle,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: _kTextSecondary,
+                        fontSize: 12,
+                        height: 1.3,
+                      ),
+                    ),
+                  ],
                 ),
               ),
-              const SizedBox(height: 4),
-              Text(
-                subtitle,
-                style: TextStyle(
-                  color: Colors.white.withValues(alpha: 0.7),
-                  fontSize: 13,
-                  height: 1.35,
-                ),
+              const Icon(
+                Icons.arrow_forward_rounded,
+                color: _kCyan,
+                size: 20,
               ),
             ],
           ),
-        ),
-        Icon(
-          Icons.arrow_forward_ios_rounded,
-          color: accent,
-          size: 16,
-        ),
-      ],
-    );
-  }
-}
-
-class _AuroraBackground extends StatelessWidget {
-  const _AuroraBackground();
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      decoration: const BoxDecoration(
-        gradient: RadialGradient(
-          radius: 1.2,
-          center: Alignment(-0.6, -0.8),
-          colors: [
-            Color(0xFF1A1B3A),
-            Color(0xFF0A0A1F),
-            Color(0xFF050510),
-          ],
-          stops: [0.0, 0.55, 1.0],
-        ),
-      ),
-      child: Stack(
-        children: [
-          Positioned(
-            top: -80,
-            right: -60,
-            child: _blob(220, const Color(0xFF00E5FF)),
-          ),
-          Positioned(
-            bottom: -100,
-            left: -80,
-            child: _blob(260, const Color(0xFFB388FF)),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _blob(double size, Color color) {
-    return Container(
-      width: size,
-      height: size,
-      decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        gradient: RadialGradient(
-          colors: [
-            color.withValues(alpha: 0.32),
-            color.withValues(alpha: 0.0),
-          ],
         ),
       ),
     );

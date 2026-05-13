@@ -35,8 +35,8 @@ enum ReportPriority {
   high;
 
   static ReportPriority fromSeverity(int severity) {
-    if (severity >= 8) return ReportPriority.high;
-    if (severity >= 5) return ReportPriority.medium;
+    if (severity >= 7) return ReportPriority.high;
+    if (severity >= 4) return ReportPriority.medium;
     return ReportPriority.low;
   }
 }

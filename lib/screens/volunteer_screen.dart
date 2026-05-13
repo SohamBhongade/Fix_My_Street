@@ -239,116 +239,149 @@ class _ReportCard extends StatelessWidget {
     }
 
     return GlassCard(
-      borderColor: accent.withValues(alpha: 0.55),
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      borderColor: accent.withValues(alpha: 0.9),
+      padding: EdgeInsets.zero,
+      child: Stack(
         children: [
-          Row(
-            children: [
-              if (bytes != null)
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(12),
-                  child: Image.memory(
-                    bytes,
-                    width: 72,
-                    height: 72,
-                    fit: BoxFit.cover,
-                  ),
-                )
-              else
-                Container(
-                  width: 72,
-                  height: 72,
-                  decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.06),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Icon(
-                    Icons.image_not_supported_outlined,
-                    color: Colors.white.withValues(alpha: 0.4),
-                  ),
-                ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
                   children: [
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            report.category,
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 16,
-                              fontWeight: FontWeight.w800,
+                    if (bytes != null)
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(12),
+                        child: Image.memory(
+                          bytes,
+                          width: 72,
+                          height: 72,
+                          fit: BoxFit.cover,
+                        ),
+                      )
+                    else
+                      Container(
+                        width: 72,
+                        height: 72,
+                        decoration: BoxDecoration(
+                          color: Colors.white.withValues(alpha: 0.06),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Icon(
+                          Icons.image_not_supported_outlined,
+                          color: Colors.white.withValues(alpha: 0.4),
+                        ),
+                      ),
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          // Right padding reserves space for the corner StatusTag.
+                          Padding(
+                            padding: const EdgeInsets.only(right: 76),
+                            child: Text(
+                              report.category,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 16,
+                                fontWeight: FontWeight.w800,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
                             ),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
                           ),
-                        ),
-                        SeverityIndicator(
-                          severity: report.severity,
-                          compact: true,
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 6),
-                    Row(
-                      children: [
-                        Icon(
-                          Icons.place_outlined,
-                          color: Colors.white.withValues(alpha: 0.6),
-                          size: 14,
-                        ),
-                        const SizedBox(width: 4),
-                        Expanded(
-                          child: Text(
-                            report.address,
+                          const SizedBox(height: 6),
+                          Row(
+                            children: [
+                              Icon(
+                                Icons.place_outlined,
+                                color: Colors.white.withValues(alpha: 0.6),
+                                size: 14,
+                              ),
+                              const SizedBox(width: 4),
+                              Expanded(
+                                child: Text(
+                                  report.address,
+                                  style: TextStyle(
+                                    color: Colors.white.withValues(alpha: 0.7),
+                                    fontSize: 12,
+                                  ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            DateFormat('d MMM yyyy · HH:mm')
+                                .format(report.createdAt),
                             style: TextStyle(
-                              color: Colors.white.withValues(alpha: 0.7),
-                              fontSize: 12,
+                              color: Colors.white.withValues(alpha: 0.45),
+                              fontSize: 11,
                             ),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
                           ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      DateFormat('d MMM yyyy · HH:mm').format(report.createdAt),
-                      style: TextStyle(
-                        color: Colors.white.withValues(alpha: 0.45),
-                        fontSize: 11,
+                        ],
                       ),
                     ),
                   ],
                 ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          Text(
-            report.description,
-            style: TextStyle(
-              color: Colors.white.withValues(alpha: 0.85),
-              fontSize: 13.5,
-              height: 1.4,
+                const SizedBox(height: 12),
+                Text(
+                  report.description,
+                  style: TextStyle(
+                    color: Colors.white.withValues(alpha: 0.85),
+                    fontSize: 13.5,
+                    height: 1.4,
+                  ),
+                ),
+                const SizedBox(height: 14),
+                Row(
+                  children: [
+                    _StatusPill(status: report.status),
+                    const Spacer(),
+                    if (!isFixed)
+                      _FixButton(
+                        updating: updating,
+                        onTap: updating ? null : onMarkFixed,
+                      ),
+                  ],
+                ),
+              ],
             ),
           ),
-          const SizedBox(height: 14),
-          Row(
-            children: [
-              _StatusPill(status: report.status),
-              const Spacer(),
-              if (!isFixed)
-                _FixButton(
-                  updating: updating,
-                  onTap: updating ? null : onMarkFixed,
-                ),
-            ],
+          // Corner severity tag — overlaid at top-right of the card.
+          Positioned(
+            top: 0,
+            right: 0,
+            child: isFixed
+                ? Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 10, vertical: 5),
+                    decoration: const BoxDecoration(
+                      color: Color(0x2266BB6A),
+                      borderRadius: BorderRadius.only(
+                        topRight: Radius.circular(18),
+                        bottomLeft: Radius.circular(12),
+                      ),
+                      border: Border(
+                        left: BorderSide(color: Color(0x9966BB6A)),
+                        bottom: BorderSide(color: Color(0x9966BB6A)),
+                      ),
+                    ),
+                    child: const Text(
+                      'FIXED',
+                      style: TextStyle(
+                        color: Color(0xFF66BB6A),
+                        fontSize: 9,
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: 1.8,
+                      ),
+                    ),
+                  )
+                : StatusTag(severity: report.severity),
           ),
         ],
       ),
