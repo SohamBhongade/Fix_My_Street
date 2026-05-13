@@ -3,6 +3,13 @@ import 'package:mongo_dart/mongo_dart.dart';
 import '../core/config.dart';
 import '../models/report_model.dart';
 
+class DatabaseException implements Exception {
+  final String message;
+  const DatabaseException(this.message);
+  @override
+  String toString() => message;
+}
+
 /// Singleton wrapper around MongoDB Atlas access for reports.
 class DatabaseService {
   DatabaseService._();
@@ -38,17 +45,46 @@ class DatabaseService {
   }
 
   /// Persists a new report. Returns the inserted document's ObjectId.
+  /// Throws [DatabaseException] on connection or write failure.
   Future<ObjectId> saveReport(ReportModel report) async {
-    final col = await _collection();
-    final id = report.id ?? ObjectId();
-    final payload = report.copyWith(id: id).toMap();
-    final result = await col.insertOne(payload);
-    print('[DB] insertOne — success: ${result.isSuccess}, nInserted: ${result.nInserted}, id: $id');
-    print('[DB] Wrote to DB="${_db!.databaseName}" collection="${col.collectionName}"');
-    if (!result.isSuccess || result.nInserted == 0) {
-      throw StateError('Insert failed: ${result.writeError?.errmsg ?? "nInserted=0"}');
+    try {
+      // Re-open if the connection was dropped since last use.
+      if (_db == null || !_isOpen) {
+        print('[DB] Connection not open — reconnecting…');
+        await connect();
+      }
+
+      final col = await _collection();
+
+      final id = report.id ?? ObjectId();
+      final payload = <String, dynamic>{
+        '_id': id,
+        'category': report.category,
+        'severity': report.severity,
+        'priority': report.priority.wire,
+        'description': report.description,
+        'latitude': report.latitude,
+        'longitude': report.longitude,
+        'address': report.address,
+        'imageBase64': report.imageBase64,
+        'status': report.status.wire,
+        'createdAt': report.createdAt.toUtc().toIso8601String(),
+        if (report.fixedAt != null)
+          'fixedAt': report.fixedAt!.toUtc().toIso8601String(),
+      };
+
+      final result = await col.insertOne(payload);
+      print('[DB] insertOne — success: ${result.isSuccess}, nInserted: ${result.nInserted}, id: $id');
+      print('[DB] Wrote to DB="${_db!.databaseName}" collection="${col.collectionName}"');
+
+      if (!result.isSuccess || result.nInserted == 0) {
+        throw StateError('Insert failed: ${result.writeError?.errmsg ?? "nInserted=0"}');
+      }
+      return id;
+    } catch (e) {
+      print('[DB] saveReport error: $e');
+      throw DatabaseException('Failed to save report: $e');
     }
-    return id;
   }
 
   /// Fetches all reports, newest first.

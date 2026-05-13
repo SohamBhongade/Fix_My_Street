@@ -7,7 +7,7 @@ import 'package:flutter/material.dart';
 import '../models/ai_analysis_result.dart';
 import '../models/report_model.dart';
 import '../services/ai_service.dart' show AIService, GroqException;
-import '../services/database_service.dart';
+import '../services/database_service.dart' show DatabaseService, DatabaseException;
 import '../services/location_service.dart';
 import '../widgets/glass_card.dart';
 import '../widgets/severity_indicator.dart';
@@ -100,33 +100,57 @@ class _AIPreviewScreenState extends State<AIPreviewScreen> {
     }
   }
 
-  Future<void> _submit() async {
+  ReportModel _buildReport() {
+    final result = _result!;
+    final loc = _location!;
+    final category = _manualCategoryOverride ?? result.category;
+    final severity = _effectiveSeverity;
+    return ReportModel(
+      category: category,
+      severity: severity,
+      priority: ReportPriority.fromSeverity(severity),
+      description: result.description,
+      latitude: loc.latitude,
+      longitude: loc.longitude,
+      address: loc.address,
+      imageBase64: base64Encode(widget.imageBytes),
+      createdAt: DateTime.now(),
+    );
+  }
+
+  Future<void> _submit({bool isRetry = false}) async {
     final result = _result;
     final loc = _location;
     if (result == null || loc == null) return;
 
     setState(() => _submitting = true);
     try {
-      final category = _manualCategoryOverride ?? result.category;
-      final severity = _effectiveSeverity;
-      final priority = ReportPriority.fromSeverity(severity);
-      final report = ReportModel(
-        category: category,
-        severity: severity,
-        priority: priority,
-        description: result.description,
-        latitude: loc.latitude,
-        longitude: loc.longitude,
-        address: loc.address,
-        imageBase64: base64Encode(widget.imageBytes),
-        createdAt: DateTime.now(),
-      );
-      await DatabaseService.instance.saveReport(report);
+      await DatabaseService.instance.saveReport(_buildReport());
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Report submitted. Thank you!')),
       );
       Navigator.of(context)..pop()..pop();
+    } on DatabaseException catch (e) {
+      if (!mounted) return;
+      final isConnectionError = e.message.toLowerCase().contains('connect') ||
+          e.message.toLowerCase().contains('master') ||
+          e.message.toLowerCase().contains('socket') ||
+          e.message.toLowerCase().contains('closed');
+
+      if (!isRetry && isConnectionError) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Connection lost. Retrying submission…')),
+        );
+        await Future.delayed(const Duration(seconds: 2));
+        if (!mounted) return;
+        await _submit(isRetry: true);
+      } else {
+        setState(() => _submitting = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Submission failed: $e')),
+        );
+      }
     } catch (e) {
       if (!mounted) return;
       setState(() => _submitting = false);
