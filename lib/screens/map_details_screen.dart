@@ -1,10 +1,17 @@
+import 'dart:ui';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 
 import '../models/report_model.dart';
 import '../services/database_service.dart';
+import '../theme/app_theme.dart';
+import '../widgets/app_buttons.dart';
 import '../widgets/severity_indicator.dart';
+
+const String _darkTileUrl =
+    'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png';
 
 class MapDetailsScreen extends StatefulWidget {
   final ReportModel report;
@@ -32,32 +39,29 @@ class _MapDetailsScreenState extends State<MapDetailsScreen> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF0D1F26),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text(
-          'Confirm Volunteering',
-          style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
+        backgroundColor: AppColors.surfaceHigh,
+        surfaceTintColor: Colors.transparent,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(AppRadius.lg),
         ),
+        title: Text('Confirm volunteering', style: AppText.heading),
         content: Text(
-          'Are you sure you want to volunteer to fix "${widget.report.category}"?',
-          style: TextStyle(color: Colors.white.withValues(alpha: 0.8)),
+          'Volunteer to fix "${widget.report.category}"?',
+          style: AppText.bodySecondary,
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(false),
             child: Text(
               'Cancel',
-              style: TextStyle(color: Colors.white.withValues(alpha: 0.6)),
+              style: AppText.button.copyWith(color: AppColors.textSecondary),
             ),
           ),
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(true),
-            child: const Text(
-              'Yes, Volunteer',
-              style: TextStyle(
-                color: Color(0xFF00E5FF),
-                fontWeight: FontWeight.w700,
-              ),
+            child: Text(
+              'Yes, volunteer',
+              style: AppText.button.copyWith(color: AppColors.olive),
             ),
           ),
         ],
@@ -79,8 +83,7 @@ class _MapDetailsScreenState extends State<MapDetailsScreen> {
       });
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text("You've volunteered! The community thanks you."),
-          backgroundColor: Color(0xFF00E5FF),
+          content: Text("You've volunteered. The community thanks you."),
         ),
       );
     } catch (e) {
@@ -90,75 +93,6 @@ class _MapDetailsScreenState extends State<MapDetailsScreen> {
         SnackBar(content: Text('Failed to update: $e')),
       );
     }
-  }
-
-  Widget _buildProfessionalWarning() {
-    return Container(
-      height: 48,
-      padding: const EdgeInsets.symmetric(horizontal: 14),
-      decoration: BoxDecoration(
-        color: const Color(0xFFFFF1F1),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: const Color(0xFFEF4444), width: 1.5),
-      ),
-      child: const Row(
-        children: [
-          Icon(Icons.shield_outlined, color: Color(0xFFEF4444), size: 18),
-          SizedBox(width: 10),
-          Expanded(
-            child: Text(
-              'Professional Repair Required: This issue is too severe for public volunteers. Local authorities have been notified.',
-              style: TextStyle(
-                color: Color(0xFFB91C1C),
-                fontSize: 11,
-                fontWeight: FontWeight.w600,
-                height: 1.3,
-              ),
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildVolunteerButton() {
-    return SizedBox(
-      height: 48,
-      child: GestureDetector(
-        onTap: (_alreadyAssigned || _volunteering) ? null : _volunteer,
-        child: AnimatedOpacity(
-          opacity: (_alreadyAssigned || _volunteering) ? 0.5 : 1,
-          duration: const Duration(milliseconds: 150),
-          child: Container(
-            decoration: BoxDecoration(
-              color: _alreadyAssigned
-                  ? const Color(0xFFD1D5DB)
-                  : const Color(0xFF0A1628),
-              borderRadius: BorderRadius.circular(14),
-            ),
-            child: Center(
-              child: Text(
-                _volunteering
-                    ? 'UPDATING…'
-                    : _alreadyAssigned
-                        ? 'ALREADY ASSIGNED'
-                        : 'VOLUNTEER TO FIX',
-                style: TextStyle(
-                  color: _alreadyAssigned
-                      ? const Color(0xFF6B7280)
-                      : Colors.white,
-                  fontWeight: FontWeight.w800,
-                  fontSize: 14,
-                  letterSpacing: 1.2,
-                ),
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
   }
 
   Marker _buildMarker() {
@@ -175,13 +109,12 @@ class _MapDetailsScreenState extends State<MapDetailsScreen> {
   @override
   Widget build(BuildContext context) {
     final r = widget.report;
-    final color = SeverityIndicator.colorFor(r.severity);
     final topPadding = MediaQuery.of(context).padding.top;
 
     return Scaffold(
+      backgroundColor: AppColors.bgBase,
       body: Column(
         children: [
-          // ── Top 3/4: Light map ──────────────────────────────────────────
           Expanded(
             flex: 3,
             child: Stack(
@@ -200,101 +133,159 @@ class _MapDetailsScreenState extends State<MapDetailsScreen> {
                   ),
                   children: [
                     TileLayer(
-                      urlTemplate:
-                          'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
+                      urlTemplate: _darkTileUrl,
                       subdomains: const ['a', 'b', 'c', 'd'],
                     ),
                     MarkerLayer(markers: [_buildMarker()]),
                   ],
                 ),
-                // Floating back button
                 Positioned(
                   top: topPadding + 8,
-                  left: 8,
-                  child: CircleAvatar(
-                    backgroundColor: Colors.white.withValues(alpha: 0.92),
-                    child: IconButton(
-                      icon: const Icon(
-                        Icons.arrow_back_rounded,
-                        color: Colors.black87,
-                      ),
-                      onPressed: () => Navigator.of(context).pop(),
-                    ),
+                  left: AppSpacing.sm,
+                  child: _BackButton(
+                    onTap: () => Navigator.of(context).pop(),
                   ),
                 ),
               ],
             ),
           ),
-          // ── Bottom 1/4: Detail panel ────────────────────────────────────
-          Expanded(
-            flex: 1,
-            child: Container(
-              color: const Color(0xFFF5F7FA),
-              padding: const EdgeInsets.fromLTRB(20, 16, 20, 16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              r.category,
-                              style: const TextStyle(
-                                color: Color(0xFF0A1628),
-                                fontSize: 17,
-                                fontWeight: FontWeight.w800,
-                              ),
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              r.description,
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                color: Color(0xFF6B7280),
-                                fontSize: 12,
-                                height: 1.4,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      // Severity badge
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 10, vertical: 6),
-                        decoration: BoxDecoration(
-                          color: color.withValues(alpha: 0.12),
-                          borderRadius: BorderRadius.circular(10),
-                          border: Border.all(
-                              color: color.withValues(alpha: 0.6), width: 1.5),
-                        ),
-                        child: Text(
-                          '${r.severity}/10',
-                          style: TextStyle(
-                            color: color,
-                            fontWeight: FontWeight.w800,
-                            fontSize: 13,
+          Container(
+            decoration: const BoxDecoration(
+              color: AppColors.surface,
+              boxShadow: [
+                BoxShadow(
+                  color: Color(0x40000000),
+                  blurRadius: 24,
+                  offset: Offset(0, -8),
+                ),
+              ],
+            ),
+            padding: EdgeInsets.fromLTRB(
+              AppSpacing.md,
+              AppSpacing.sm,
+              AppSpacing.md,
+              AppSpacing.sm + MediaQuery.of(context).padding.bottom,
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(r.category, style: AppText.title),
+                          const SizedBox(height: 6),
+                          Text(
+                            r.description,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: AppText.caption,
                           ),
-                        ),
+                        ],
                       ),
-                    ],
-                  ),
-                  // Action area: safety gate or volunteer button
-                  _requiresProfessional
-                      ? _buildProfessionalWarning()
-                      : _buildVolunteerButton(),
-                ],
-              ),
+                    ),
+                    const SizedBox(width: AppSpacing.sm),
+                    SeverityChip(severity: r.severity),
+                  ],
+                ),
+                const SizedBox(height: AppSpacing.sm),
+                _requiresProfessional
+                    ? _buildProfessionalWarning()
+                    : PrimaryButton(
+                        label: _volunteering
+                            ? 'Updating'
+                            : _alreadyAssigned
+                                ? 'Already assigned'
+                                : 'Volunteer to fix',
+                        busy: _volunteering,
+                        height: 48,
+                        onTap: (_alreadyAssigned || _volunteering)
+                            ? null
+                            : _volunteer,
+                      ),
+              ],
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildProfessionalWarning() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: AppColors.critical.withValues(alpha: 0.10),
+        borderRadius: BorderRadius.circular(AppRadius.sm),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.shield_outlined,
+              color: AppColors.critical, size: 16),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              'Professional repair required — authorities have been notified.',
+              style: AppText.caption.copyWith(
+                color: AppColors.critical,
+                fontWeight: FontWeight.w500,
+              ),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _BackButton extends StatefulWidget {
+  final VoidCallback onTap;
+  const _BackButton({required this.onTap});
+
+  @override
+  State<_BackButton> createState() => _BackButtonState();
+}
+
+class _BackButtonState extends State<_BackButton> {
+  bool _pressed = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedScale(
+      scale: _pressed ? 0.92 : 1,
+      duration: AppMotion.fast,
+      curve: AppMotion.easeOut,
+      child: GestureDetector(
+        onTapDown: (_) => setState(() => _pressed = true),
+        onTapCancel: () => setState(() => _pressed = false),
+        onTapUp: (_) => setState(() => _pressed = false),
+        onTap: widget.onTap,
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(AppRadius.sm),
+          child: BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+            child: Container(
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(
+                color: AppColors.mapSheetBg,
+                borderRadius: BorderRadius.circular(AppRadius.sm),
+                border: Border.all(color: AppColors.hairline, width: 1),
+              ),
+              child: const Icon(
+                Icons.arrow_back_rounded,
+                color: AppColors.textPrimary,
+                size: 18,
+              ),
+            ),
+          ),
+        ),
       ),
     );
   }

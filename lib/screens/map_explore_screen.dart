@@ -1,4 +1,4 @@
-import 'dart:async';
+import 'dart:ui';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
@@ -6,10 +6,12 @@ import 'package:latlong2/latlong.dart';
 
 import '../models/report_model.dart';
 import '../services/database_service.dart';
+import '../theme/app_theme.dart';
+import '../widgets/app_buttons.dart';
 import '../widgets/severity_indicator.dart';
 import 'map_details_screen.dart';
 
-const String _lightTileUrl =
+const String _darkTileUrl =
     'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png';
 
 const LatLng _rakCenter = LatLng(25.7911, 55.9432);
@@ -77,24 +79,12 @@ class _MapExploreScreenState extends State<MapExploreScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final topPad = MediaQuery.of(context).padding.top;
+    final openCount =
+        _reports.where((r) => r.status != ReportStatus.fixed).length;
+
     return Scaffold(
-      backgroundColor: Colors.white,
-      appBar: AppBar(
-        title: const Text(
-          'COMMUNITY MAP',
-          style: TextStyle(
-            fontSize: 15,
-            fontWeight: FontWeight.w800,
-            letterSpacing: 2.5,
-            color: Color(0xFF0A1628),
-          ),
-        ),
-        centerTitle: true,
-        backgroundColor: Colors.white,
-        elevation: 1,
-        iconTheme: const IconThemeData(color: Color(0xFF0A1628)),
-        surfaceTintColor: Colors.white,
-      ),
+      backgroundColor: AppColors.bgBase,
       body: Stack(
         children: [
           FlutterMap(
@@ -108,7 +98,7 @@ class _MapExploreScreenState extends State<MapExploreScreen> {
             ),
             children: [
               TileLayer(
-                urlTemplate: _lightTileUrl,
+                urlTemplate: _darkTileUrl,
                 subdomains: const ['a', 'b', 'c', 'd'],
               ),
               if (!_loading)
@@ -130,10 +120,175 @@ class _MapExploreScreenState extends State<MapExploreScreen> {
           ),
           if (_loading)
             const Center(
-              child: CircularProgressIndicator(color: Color(0xFF00E5FF)),
+              child: SizedBox(
+                width: 22,
+                height: 22,
+                child: CircularProgressIndicator(
+                  color: AppColors.olive,
+                  strokeWidth: 2,
+                ),
+              ),
             ),
+          // Floating top bar (back + title + counter)
+          Positioned(
+            top: topPad + 8,
+            left: AppSpacing.sm,
+            right: AppSpacing.sm,
+            child: _FloatingTopBar(
+              title: 'Community map',
+              subtitle: _loading
+                  ? 'Loading'
+                  : '$openCount open · ${_reports.length} total',
+              onBack: () => Navigator.of(context).pop(),
+            ),
+          ),
+          // Floating legend bottom-left
+          Positioned(
+            left: AppSpacing.sm,
+            bottom: AppSpacing.md,
+            child: _Legend(),
+          ),
         ],
       ),
+    );
+  }
+}
+
+class _FloatingTopBar extends StatelessWidget {
+  final String title;
+  final String subtitle;
+  final VoidCallback onBack;
+
+  const _FloatingTopBar({
+    required this.title,
+    required this.subtitle,
+    required this.onBack,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(AppRadius.md),
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 24, sigmaY: 24),
+        child: Container(
+          padding: const EdgeInsets.symmetric(
+            horizontal: 12,
+            vertical: 10,
+          ),
+          decoration: BoxDecoration(
+            color: AppColors.mapSheetBg,
+            borderRadius: BorderRadius.circular(AppRadius.md),
+            border: Border.all(color: AppColors.hairline, width: 1),
+          ),
+          child: Row(
+            children: [
+              _CircleIconButton(
+                icon: Icons.arrow_back_rounded,
+                onTap: onBack,
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(title, style: AppText.heading.copyWith(fontSize: 15)),
+                    const SizedBox(height: 2),
+                    Text(subtitle, style: AppText.metadata),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _CircleIconButton extends StatefulWidget {
+  final IconData icon;
+  final VoidCallback onTap;
+  const _CircleIconButton({required this.icon, required this.onTap});
+
+  @override
+  State<_CircleIconButton> createState() => _CircleIconButtonState();
+}
+
+class _CircleIconButtonState extends State<_CircleIconButton> {
+  bool _pressed = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedScale(
+      scale: _pressed ? 0.92 : 1,
+      duration: AppMotion.fast,
+      curve: AppMotion.easeOut,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTapDown: (_) => setState(() => _pressed = true),
+        onTapCancel: () => setState(() => _pressed = false),
+        onTapUp: (_) => setState(() => _pressed = false),
+        onTap: widget.onTap,
+        child: Container(
+          width: 36,
+          height: 36,
+          decoration: BoxDecoration(
+            color: AppColors.surfaceHigh,
+            borderRadius: BorderRadius.circular(AppRadius.sm),
+          ),
+          child: Icon(widget.icon, color: AppColors.textPrimary, size: 18),
+        ),
+      ),
+    );
+  }
+}
+
+class _Legend extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(AppRadius.sm),
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          decoration: BoxDecoration(
+            color: AppColors.mapSheetBg,
+            borderRadius: BorderRadius.circular(AppRadius.sm),
+            border: Border.all(color: AppColors.hairline, width: 1),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text('LEGEND', style: AppText.label),
+              const SizedBox(height: 8),
+              _legendRow(AppColors.critical, 'Critical'),
+              const SizedBox(height: 4),
+              _legendRow(AppColors.moderate, 'Moderate'),
+              const SizedBox(height: 4),
+              _legendRow(AppColors.minor, 'Minor'),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _legendRow(Color color, String label) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 8,
+          height: 8,
+          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+        ),
+        const SizedBox(width: 8),
+        Text(label, style: AppText.caption),
+      ],
     );
   }
 }
@@ -146,19 +301,22 @@ class _ReportSheet extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = SeverityIndicator.colorFor(report.severity);
     return Container(
-      margin: const EdgeInsets.fromLTRB(12, 0, 12, 24),
-      padding: const EdgeInsets.all(20),
+      margin: EdgeInsets.fromLTRB(
+        AppSpacing.sm,
+        0,
+        AppSpacing.sm,
+        AppSpacing.md + MediaQuery.of(context).padding.bottom,
+      ),
+      padding: const EdgeInsets.all(AppSpacing.sm),
       decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: color.withValues(alpha: 0.4)),
-        boxShadow: [
+        color: AppColors.surfaceHigh,
+        borderRadius: BorderRadius.circular(AppRadius.lg),
+        boxShadow: const [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.08),
-            blurRadius: 16,
-            offset: const Offset(0, -2),
+            color: Color(0x66000000),
+            blurRadius: 32,
+            offset: Offset(0, 12),
           ),
         ],
       ),
@@ -170,89 +328,45 @@ class _ReportSheet extends StatelessWidget {
             child: Container(
               width: 36,
               height: 4,
-              margin: const EdgeInsets.only(bottom: 16),
+              margin: const EdgeInsets.only(bottom: AppSpacing.sm),
               decoration: BoxDecoration(
-                color: const Color(0xFFE5E7EB),
+                color: AppColors.divider,
                 borderRadius: BorderRadius.circular(2),
               ),
             ),
           ),
-          Text(
-            report.category,
-            style: const TextStyle(
-              color: Color(0xFF0A1628),
-              fontSize: 18,
-              fontWeight: FontWeight.w800,
-            ),
+          Row(
+            children: [
+              Expanded(child: Text(report.category, style: AppText.title)),
+              const SizedBox(width: 8),
+              SeverityChip(severity: report.severity),
+            ],
           ),
           const SizedBox(height: 8),
           Row(
             children: [
-              Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                decoration: BoxDecoration(
-                  color: color.withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: color.withValues(alpha: 0.7)),
-                  boxShadow: [
-                    BoxShadow(
-                      color: color.withValues(alpha: 0.3),
-                      blurRadius: 8,
-                    ),
-                  ],
-                ),
-                child: Text(
-                  '${report.severity}/10 · ${SeverityIndicator.labelFor(report.severity)}',
-                  style: TextStyle(
-                    color: color,
-                    fontWeight: FontWeight.w800,
-                    fontSize: 12,
-                    letterSpacing: 0.6,
-                    shadows: [
-                      Shadow(
-                          color: color.withValues(alpha: 0.6), blurRadius: 6),
-                    ],
-                  ),
-                ),
+              const Icon(
+                Icons.place_outlined,
+                color: AppColors.textTertiary,
+                size: 14,
               ),
-              const SizedBox(width: 10),
+              const SizedBox(width: 4),
               Expanded(
                 child: Text(
                   report.address,
-                  style: const TextStyle(
-                    color: Color(0xFF6B7280),
-                    fontSize: 13,
-                  ),
+                  style: AppText.caption,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 18),
-          SizedBox(
-            width: double.infinity,
+          const SizedBox(height: AppSpacing.sm),
+          PrimaryButton(
+            label: 'View full details',
+            icon: Icons.arrow_forward_rounded,
+            onTap: onViewDetails,
             height: 48,
-            child: ElevatedButton(
-              onPressed: onViewDetails,
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF0A1628),
-                foregroundColor: Colors.white,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(14),
-                ),
-                elevation: 0,
-              ),
-              child: const Text(
-                'VIEW FULL DETAILS',
-                style: TextStyle(
-                  fontWeight: FontWeight.w800,
-                  fontSize: 14,
-                  letterSpacing: 1.2,
-                ),
-              ),
-            ),
           ),
         ],
       ),

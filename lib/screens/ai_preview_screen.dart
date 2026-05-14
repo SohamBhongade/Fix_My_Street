@@ -7,10 +7,12 @@ import 'package:flutter/material.dart';
 import '../models/ai_analysis_result.dart';
 import '../models/report_model.dart';
 import '../services/ai_service.dart' show AIService, GroqException;
-import '../services/database_service.dart' show DatabaseService, DatabaseException;
+import '../services/database_service.dart' show DatabaseService;
 import '../services/location_service.dart';
-import '../widgets/glass_card.dart';
+import '../theme/app_theme.dart';
+import '../widgets/app_buttons.dart';
 import '../widgets/severity_indicator.dart';
+import '../widgets/surface_card.dart';
 
 const Map<String, int> _categorySeverity = {
   'Exposed Wiring': 10,
@@ -30,16 +32,10 @@ const Map<String, int> _categorySeverity = {
   'Graffiti': 1,
 };
 
-Color _priorityColorFor(int severity) {
-  if (severity >= 8) return const Color(0xFFFF1744);
-  if (severity >= 4) return const Color(0xFFFF9100);
-  return const Color(0xFF00E676);
-}
-
 String _priorityLabelFor(int severity) {
-  if (severity >= 8) return 'CRITICAL';
-  if (severity >= 4) return 'MODERATE';
-  return 'MINOR';
+  if (severity >= 8) return 'Critical';
+  if (severity >= 4) return 'Moderate';
+  return 'Minor';
 }
 
 class AIPreviewScreen extends StatefulWidget {
@@ -65,7 +61,7 @@ class _AIPreviewScreenState extends State<AIPreviewScreen> {
   String? _manualCategoryOverride;
 
   int get _effectiveSeverity => _manualCategoryOverride != null
-      ? _categorySeverity[_manualCategoryOverride]!
+      ? (_categorySeverity[_manualCategoryOverride] ?? 0)
       : (_result?.severity ?? 0);
 
   @override
@@ -124,136 +120,125 @@ class _AIPreviewScreenState extends State<AIPreviewScreen> {
     if (result == null || loc == null) return;
 
     setState(() => _submitting = true);
-    try {
-      await DatabaseService.instance.saveReport(_buildReport());
-      if (!mounted) return;
+
+    final ok = await DatabaseService.instance.saveReport(_buildReport());
+    if (!mounted) return;
+
+    if (ok) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Report submitted. Thank you!')),
+        const SnackBar(content: Text('Report submitted. Thank you.')),
       );
       Navigator.of(context)..pop()..pop();
-    } on DatabaseException catch (e) {
-      if (!mounted) return;
-      final isConnectionError = e.message.toLowerCase().contains('connect') ||
-          e.message.toLowerCase().contains('master') ||
-          e.message.toLowerCase().contains('socket') ||
-          e.message.toLowerCase().contains('closed');
-
-      if (!isRetry && isConnectionError) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Connection lost. Retrying submission…')),
-        );
-        await Future.delayed(const Duration(seconds: 2));
-        if (!mounted) return;
-        await _submit(isRetry: true);
-      } else {
-        setState(() => _submitting = false);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Submission failed: $e')),
-        );
-      }
-    } catch (e) {
-      if (!mounted) return;
-      setState(() => _submitting = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Submission failed: $e')),
-      );
+      return;
     }
+
+    if (!isRetry) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Connection lost. Reconnecting and retrying.'),
+        ),
+      );
+      try {
+        await DatabaseService.instance.reopen();
+      } catch (_) {}
+      if (!mounted) return;
+      await _submit(isRetry: true);
+      return;
+    }
+
+    setState(() => _submitting = false);
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text(
+            'Submission failed. Please check your connection and try again.'),
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      extendBodyBehindAppBar: true,
-      appBar: AppBar(
-        title: const Text(
-          'REPORT PREVIEW',
-          style: TextStyle(
-            fontSize: 15,
-            fontWeight: FontWeight.w800,
-            letterSpacing: 2.5,
-            color: Colors.white,
+      backgroundColor: AppColors.bgBase,
+      appBar: AppBar(title: const Text('Report preview')),
+      body: SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(
+            AppSpacing.md,
+            AppSpacing.xs,
+            AppSpacing.md,
+            AppSpacing.md,
           ),
-        ),
-        centerTitle: true,
-        backgroundColor: Colors.transparent,
-        elevation: 0,
-      ),
-      body: Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [Color(0xFF0A0A1F), Color(0xFF050510)],
-          ),
-        ),
-        child: SafeArea(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                GlassCard(
-                  padding: const EdgeInsets.all(8),
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(14),
-                    child: Image.file(
-                      File(widget.imagePath),
-                      height: 240,
-                      width: double.infinity,
-                      fit: BoxFit.cover,
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 16),
-                if (_busy) _buildLoading(),
-                if (_error != null) _buildError(_error!),
-                if (!_busy && _error == null && _result != null) ...[
-                  _buildAIAutoClassification(_result!),
-                  const SizedBox(height: 18),
-                  _buildManualDropdown(_result!),
-                  const SizedBox(height: 18),
-                  _buildStatGrid(_result!),
-                  const SizedBox(height: 18),
-                  if (_location != null) _buildLocationCard(_location!),
-                  const SizedBox(height: 22),
-                  _SubmitButton(
-                    label: _submitting ? 'SUBMITTING…' : 'SUBMIT REPORT',
-                    onTap: _submitting ? null : _submit,
-                  ),
-                ],
-              ],
-            ),
+          child: AnimatedSwitcher(
+            duration: AppMotion.base,
+            switchInCurve: AppMotion.easeOut,
+            child: _buildBody(),
           ),
         ),
       ),
     );
   }
 
+  Widget _buildBody() {
+    return Column(
+      key: ValueKey('${_busy}_${_error != null}'),
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        SurfaceCard(
+          padding: const EdgeInsets.all(AppSpacing.xs),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(AppRadius.sm),
+            child: Image.file(
+              File(widget.imagePath),
+              height: 240,
+              width: double.infinity,
+              fit: BoxFit.cover,
+            ),
+          ),
+        ),
+        const SizedBox(height: AppSpacing.sm),
+        if (_busy) _buildLoading(),
+        if (_error != null) _buildError(_error!),
+        if (!_busy && _error == null && _result != null) ...[
+          _buildClassificationCard(_result!),
+          const SizedBox(height: AppSpacing.sm),
+          _buildManualDropdown(_result!),
+          const SizedBox(height: AppSpacing.sm),
+          _buildStatGrid(),
+          const SizedBox(height: AppSpacing.sm),
+          if (_location != null) _buildLocationCard(_location!),
+          const SizedBox(height: AppSpacing.md),
+          PrimaryButton(
+            label: _submitting ? 'Submitting' : 'Submit report',
+            busy: _submitting,
+            onTap: _submitting ? null : _submit,
+          ),
+        ],
+      ],
+    );
+  }
+
   Widget _buildLoading() {
-    return GlassCard(
-      padding: const EdgeInsets.all(28),
+    return SurfaceCard(
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.md,
+        vertical: AppSpacing.lg,
+      ),
       child: Center(
         child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
+          mainAxisSize: MainAxisSize.min,
           children: [
-            const CircularProgressIndicator(color: Color(0xFF00E5FF)),
-            const SizedBox(height: 16),
-            const Text(
-              'AI is analyzing your picture',
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 16,
-                fontWeight: FontWeight.w700,
+            const SizedBox(
+              width: 22,
+              height: 22,
+              child: CircularProgressIndicator(
+                color: AppColors.olive,
+                strokeWidth: 2,
               ),
             ),
+            const SizedBox(height: AppSpacing.sm),
+            Text('Analyzing image', style: AppText.heading),
             const SizedBox(height: 4),
-            Text(
-              'Please wait...',
-              style: TextStyle(
-                color: Colors.white.withValues(alpha: 0.6),
-                fontSize: 13,
-              ),
-            ),
+            Text('Detecting category and severity', style: AppText.caption),
           ],
         ),
       ),
@@ -261,43 +246,33 @@ class _AIPreviewScreenState extends State<AIPreviewScreen> {
   }
 
   Widget _buildError(String message) {
-    return GlassCard(
-      borderColor: const Color(0x66FF5252),
-      padding: const EdgeInsets.all(20),
+    return SurfaceCard(
+      padding: const EdgeInsets.all(AppSpacing.sm),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Row(
+          Row(
             children: [
-              Icon(Icons.error_outline_rounded, color: Color(0xFFFF5252)),
-              SizedBox(width: 8),
+              const Icon(Icons.error_outline_rounded,
+                  color: AppColors.danger, size: 18),
+              const SizedBox(width: 8),
               Text(
                 'Something went wrong',
-                style: TextStyle(
-                  color: Color(0xFFFF5252),
-                  fontWeight: FontWeight.w700,
-                ),
+                style: AppText.heading.copyWith(color: AppColors.danger),
               ),
             ],
           ),
           const SizedBox(height: 8),
-          Text(
-            message,
-            style: TextStyle(
-              color: Colors.white.withValues(alpha: 0.8),
-              fontSize: 13,
-            ),
-          ),
-          const SizedBox(height: 12),
+          Text(message, style: AppText.bodySecondary),
+          const SizedBox(height: AppSpacing.sm),
           Align(
             alignment: Alignment.centerRight,
-            child: TextButton.icon(
-              onPressed: _run,
-              icon: const Icon(Icons.refresh_rounded, color: Color(0xFF00E5FF)),
-              label: const Text(
-                'Retry',
-                style: TextStyle(color: Color(0xFF00E5FF)),
-              ),
+            child: SecondaryButton(
+              label: 'Retry',
+              icon: Icons.refresh_rounded,
+              expand: false,
+              height: 40,
+              onTap: _run,
             ),
           ),
         ],
@@ -305,68 +280,55 @@ class _AIPreviewScreenState extends State<AIPreviewScreen> {
     );
   }
 
-  Widget _buildAIAutoClassification(AIAnalysisResult r) {
-    final severityColor = SeverityIndicator.colorFor(r.severity);
-    return Container(
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        color: const Color(0xFF14060A),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: const Color(0xFFFF5252), width: 1),
-      ),
+  Widget _buildClassificationCard(AIAnalysisResult r) {
+    final isOther = r.category == 'Other';
+    final detectionLabel = isOther
+        ? 'Analysis inconclusive'
+        : r.category;
+    final detectionDesc = isOther
+        ? 'The photo is too unclear for precise detection. Please select the category manually below.'
+        : r.description;
+
+    return SurfaceCard(
+      padding: const EdgeInsets.all(AppSpacing.sm),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            'AI AUTO CLASSIFICATION',
-            style: TextStyle(
-              color: Colors.white.withValues(alpha: 0.55),
-              fontSize: 11,
-              letterSpacing: 2,
-              fontWeight: FontWeight.w700,
-            ),
+          Row(
+            children: [
+              Text('AI CLASSIFICATION', style: AppText.label),
+              const Spacer(),
+              if (!isOther)
+                SeverityChip(severity: _effectiveSeverity, showScore: true),
+            ],
           ),
-          const SizedBox(height: 10),
-          Text(
-            '${r.category} detected',
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 18,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-          const SizedBox(height: 6),
-          Text(
-            '${r.severity}/10 severity',
-            style: TextStyle(
-              color: severityColor,
-              fontSize: 14,
-              fontWeight: FontWeight.w700,
-              shadows: [
-                Shadow(color: severityColor.withValues(alpha: 0.5), blurRadius: 8),
-              ],
-            ),
-          ),
-          const SizedBox(height: 12),
-          Text(
-            r.description,
-            style: TextStyle(
-              color: Colors.white.withValues(alpha: 0.8),
-              fontSize: 13,
-              height: 1.45,
-              fontStyle: FontStyle.italic,
-            ),
-          ),
+          const SizedBox(height: AppSpacing.sm),
+          Text(detectionLabel, style: AppText.title),
+          const SizedBox(height: 8),
+          Text(detectionDesc, style: AppText.bodySecondary),
           if (_manualCategoryOverride != null) ...[
-            const SizedBox(height: 10),
-            Text(
-              'Manual override: $_manualCategoryOverride selected with $_effectiveSeverity/10 severity.',
-              style: const TextStyle(
-                color: Color(0xFF00E5FF),
-                fontSize: 13,
-                height: 1.45,
-                fontStyle: FontStyle.italic,
-                fontWeight: FontWeight.w600,
+            const SizedBox(height: AppSpacing.sm),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: AppColors.oliveGhost,
+                borderRadius: BorderRadius.circular(AppRadius.sm),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.tune_rounded,
+                      color: AppColors.olive, size: 16),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Manual override · $_manualCategoryOverride · $_effectiveSeverity/10',
+                      style: AppText.caption.copyWith(
+                        color: AppColors.olive,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
           ],
@@ -376,63 +338,67 @@ class _AIPreviewScreenState extends State<AIPreviewScreen> {
   }
 
   Widget _buildManualDropdown(AIAnalysisResult r) {
+    final isEnabled = r.category == 'Other';
     final categories = _categorySeverity.keys.toList();
     final initialValue = _manualCategoryOverride ??
         (categories.contains(r.category) ? r.category : categories.first);
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          'MANUAL CLASSIFICATION',
-          style: TextStyle(
-            color: Colors.white.withValues(alpha: 0.55),
-            fontSize: 11,
-            letterSpacing: 2,
-            fontWeight: FontWeight.w700,
-          ),
-        ),
-        const SizedBox(height: 8),
-        DropdownButtonFormField<String>(
-          initialValue: initialValue,
-          dropdownColor: const Color(0xFF14262C),
-          iconEnabledColor: const Color(0xFF00E5FF),
-          style: const TextStyle(
-            color: Colors.white,
-            fontSize: 14,
-            fontWeight: FontWeight.w600,
-          ),
-          decoration: InputDecoration(
-            filled: true,
-            fillColor: const Color(0xFF14262C),
-            contentPadding:
-                const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: BorderSide(
-                color: Colors.white.withValues(alpha: 0.15),
+    return AnimatedOpacity(
+      duration: AppMotion.base,
+      opacity: isEnabled ? 1.0 : 0.4,
+      child: IgnorePointer(
+        ignoring: !isEnabled,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('MANUAL CLASSIFICATION', style: AppText.label),
+            const SizedBox(height: 8),
+            DropdownButtonFormField<String>(
+              initialValue: initialValue,
+              dropdownColor: AppColors.surfaceHigh,
+              iconEnabledColor: AppColors.olive,
+              borderRadius: BorderRadius.circular(AppRadius.sm),
+              style: AppText.body,
+              decoration: InputDecoration(
+                filled: true,
+                fillColor: AppColors.surface,
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 14,
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(AppRadius.sm),
+                  borderSide: const BorderSide(color: AppColors.divider),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(AppRadius.sm),
+                  borderSide:
+                      const BorderSide(color: AppColors.olive, width: 1.5),
+                ),
+                disabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(AppRadius.sm),
+                  borderSide: const BorderSide(color: AppColors.hairline),
+                ),
               ),
+              items: categories
+                  .map((c) => DropdownMenuItem(value: c, child: Text(c)))
+                  .toList(),
+              onChanged: isEnabled
+                  ? (v) {
+                      if (v == null) return;
+                      setState(() => _manualCategoryOverride = v);
+                    }
+                  : null,
             ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: const BorderSide(color: Color(0xFF00E5FF), width: 1.5),
-            ),
-          ),
-          items: categories
-              .map((c) => DropdownMenuItem(value: c, child: Text(c)))
-              .toList(),
-          onChanged: (v) {
-            if (v == null) return;
-            setState(() => _manualCategoryOverride = v);
-          },
+          ],
         ),
-      ],
+      ),
     );
   }
 
-  Widget _buildStatGrid(AIAnalysisResult r) {
+  Widget _buildStatGrid() {
     final severity = _effectiveSeverity;
-    final tileColor = _priorityColorFor(severity);
+    final color = SeverityIndicator.colorFor(severity);
 
     return Row(
       children: [
@@ -440,15 +406,15 @@ class _AIPreviewScreenState extends State<AIPreviewScreen> {
           child: _StatTile(
             label: 'PRIORITY',
             value: _priorityLabelFor(severity),
-            color: tileColor,
+            color: color,
           ),
         ),
-        const SizedBox(width: 12),
+        const SizedBox(width: AppSpacing.sm),
         Expanded(
           child: _StatTile(
             label: 'SEVERITY',
-            value: _busy ? 'PENDING' : '$severity/10',
-            color: _busy ? Colors.white.withValues(alpha: 0.5) : tileColor,
+            value: '$severity / 10',
+            color: color,
           ),
         ),
       ],
@@ -456,28 +422,23 @@ class _AIPreviewScreenState extends State<AIPreviewScreen> {
   }
 
   Widget _buildLocationCard(ResolvedLocation loc) {
-    return GlassCard(
-      borderColor: const Color(0x66B388FF),
-      padding: const EdgeInsets.all(18),
+    return SurfaceCard(
+      padding: const EdgeInsets.all(AppSpacing.sm),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           _LocationRow(
             icon: Icons.gps_fixed_rounded,
-            label: 'GPS COORDINATES',
+            label: 'COORDINATES',
             value:
                 '${loc.latitude.toStringAsFixed(5)}, ${loc.longitude.toStringAsFixed(5)}',
           ),
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 12),
-            child: Container(
-              height: 1,
-              color: Colors.white.withValues(alpha: 0.08),
-            ),
-          ),
+          const SizedBox(height: AppSpacing.sm),
+          const Divider(height: 1, color: AppColors.divider),
+          const SizedBox(height: AppSpacing.sm),
           _LocationRow(
-            icon: Icons.place_rounded,
-            label: 'STREET NAME',
+            icon: Icons.place_outlined,
+            label: 'ADDRESS',
             value: loc.address,
           ),
         ],
@@ -499,31 +460,20 @@ class _StatTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GlassCard(
-      padding: const EdgeInsets.all(16),
+    return SurfaceCard(
+      padding: const EdgeInsets.all(AppSpacing.sm),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            label,
-            style: TextStyle(
-              color: Colors.white.withValues(alpha: 0.55),
-              fontSize: 11,
-              letterSpacing: 2,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-          const SizedBox(height: 8),
+          Text(label, style: AppText.label),
+          const SizedBox(height: 10),
           Text(
             value,
             style: TextStyle(
               color: color,
-              fontSize: 20,
-              fontWeight: FontWeight.w800,
-              letterSpacing: 1,
-              shadows: [
-                Shadow(color: color.withValues(alpha: 0.55), blurRadius: 10),
-              ],
+              fontSize: 18,
+              fontWeight: FontWeight.w600,
+              letterSpacing: -0.2,
             ),
           ),
         ],
@@ -548,74 +498,22 @@ class _LocationRow extends StatelessWidget {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Icon(icon, color: const Color(0xFFB388FF), size: 20),
+        Icon(icon, color: AppColors.olive, size: 18),
         const SizedBox(width: 12),
         Expanded(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                label,
-                style: TextStyle(
-                  color: Colors.white.withValues(alpha: 0.55),
-                  fontSize: 11,
-                  letterSpacing: 2,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
+              Text(label, style: AppText.label),
               const SizedBox(height: 4),
               Text(
                 value,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                ),
+                style: AppText.body.copyWith(fontWeight: FontWeight.w500),
               ),
             ],
           ),
         ),
       ],
-    );
-  }
-}
-
-class _SubmitButton extends StatelessWidget {
-  final String label;
-  final VoidCallback? onTap;
-
-  const _SubmitButton({required this.label, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    final disabled = onTap == null;
-    return AnimatedOpacity(
-      opacity: disabled ? 0.5 : 1,
-      duration: const Duration(milliseconds: 150),
-      child: GestureDetector(
-        onTap: onTap,
-        child: Container(
-          height: 56,
-          decoration: BoxDecoration(
-            color: const Color(0xFF00E5FF),
-            borderRadius: BorderRadius.circular(16),
-            boxShadow: const [
-              BoxShadow(color: Color(0x6600E5FF), blurRadius: 22),
-            ],
-          ),
-          child: Center(
-            child: Text(
-              label,
-              style: const TextStyle(
-                color: Colors.black,
-                fontWeight: FontWeight.w800,
-                fontSize: 15,
-                letterSpacing: 1.5,
-              ),
-            ),
-          ),
-        ),
-      ),
     );
   }
 }

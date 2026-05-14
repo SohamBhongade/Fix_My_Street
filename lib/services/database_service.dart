@@ -44,18 +44,28 @@ class DatabaseService {
     return _reports!;
   }
 
-  /// Persists a new report. Returns the inserted document's ObjectId.
-  /// Throws [DatabaseException] on connection or write failure.
-  Future<ObjectId> saveReport(ReportModel report) async {
+  /// Persists a new report.
+  ///
+  /// Returns `true` on success, `false` on any connection or write failure.
+  /// Performs a pre-flight check on the Mongo connection state — if the
+  /// socket dropped while the user was on the camera/preview screen, this
+  /// re-opens it before issuing the insert, eliminating the "No master
+  /// connection" error that surfaces after long idle periods.
+  Future<bool> saveReport(ReportModel report) async {
     try {
-      // Re-open if the connection was dropped since last use.
-      if (_db == null || !_isOpen) {
-        print('[DB] Connection not open — reconnecting…');
-        await connect();
+      // Pre-flight: ensure the Mongo connection is OPEN before insertOne.
+      // Db.state is null before the first open(), so guard for that too.
+      if (_db == null || _db!.state != State.open) {
+        print('[DB] Pre-flight: connection not OPEN — re-establishing…');
+        if (_db == null) {
+          await connect();
+        } else {
+          await _db!.open();
+          _reports ??= _db!.collection(AppConfig.reportsCollection);
+        }
       }
 
-      final col = await _collection();
-
+      final col = _reports!;
       final id = report.id ?? ObjectId();
       final payload = <String, dynamic>{
         '_id': id,
@@ -74,16 +84,45 @@ class DatabaseService {
       };
 
       final result = await col.insertOne(payload);
-      print('[DB] insertOne — success: ${result.isSuccess}, nInserted: ${result.nInserted}, id: $id');
-      print('[DB] Wrote to DB="${_db!.databaseName}" collection="${col.collectionName}"');
+      print(
+          '[DB] insertOne — success: ${result.isSuccess}, nInserted: ${result.nInserted}, id: $id');
 
       if (!result.isSuccess || result.nInserted == 0) {
-        throw StateError('Insert failed: ${result.writeError?.errmsg ?? "nInserted=0"}');
+        print(
+            '[DB] saveReport error: insert rejected — ${result.writeError?.errmsg ?? "nInserted=0"}');
+        return false;
       }
-      return id;
+      return true;
     } catch (e) {
       print('[DB] saveReport error: $e');
-      throw DatabaseException('Failed to save report: $e');
+      return false;
+    }
+  }
+
+  /// Forces a fresh connection. Used by the UI as a recovery step before
+  /// retrying a failed submission.
+  Future<void> reopen() async {
+    try {
+      if (_db != null && _isOpen) await _db!.close();
+    } catch (_) {}
+    _db = null;
+    _reports = null;
+    await connect();
+  }
+
+  /// Emits the full report list immediately, then re-fetches every [interval].
+  /// Use this on the Home Screen so the map reacts to new submissions without
+  /// requiring a manual pull-to-refresh.
+  Stream<List<ReportModel>> watchReports({
+    Duration interval = const Duration(seconds: 5),
+  }) async* {
+    while (true) {
+      try {
+        yield await fetchReports();
+      } catch (_) {
+        // Swallow errors so the stream never closes on a transient failure.
+      }
+      await Future.delayed(interval);
     }
   }
 
