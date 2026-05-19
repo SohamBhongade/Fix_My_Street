@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:http/http.dart' as http;
 
 import '../core/config.dart';
+import '../core/issue_categories.dart';
 import '../models/ai_analysis_result.dart';
 
 /// Groq-specific error thrown when the API returns a non-200 status.
@@ -31,17 +32,41 @@ class AIService {
 
   // System prompt — kept in a separate role so Llama 4 treats it as an
   // authoritative instruction rather than part of the conversation.
-  static const String _systemPrompt =
-      'You are a senior municipal-maintenance inspector for Ras Al Khaimah, UAE. '
-      'When shown a photograph of a street or public-infrastructure issue, you '
-      'respond with ONLY a valid JSON object — no markdown fences, no prose. '
-      'The JSON must have exactly three keys:\n'
-      '  "category"    — string, one of: Pothole | Broken Streetlight | '
-      'Damaged Sign | Garbage / Debris | Water Leak | Damaged Sidewalk | '
-      'Graffiti | Fallen Tree | Other\n'
-      '  "severity"    — integer 1–10 (1 = cosmetic, 10 = immediate danger to life)\n'
-      '  "description" — string, 1–2 factual sentences, max 280 characters\n'
-      'Do not include any text outside the JSON object.';
+  //
+  // The category list is built from [kIssueCategories] at runtime so the
+  // model can never drift out of sync with the UI's manual dropdown and
+  // the volunteer-eligibility helper. If you add/remove a category, edit
+  // `lib/core/issue_categories.dart` — this prompt updates automatically.
+  static final String _systemPrompt = _buildSystemPrompt();
+
+  static String _buildSystemPrompt() {
+    final allowed = kIssueCategories.join(' | ');
+    return 'You are a senior municipal-maintenance inspector for Ras Al '
+        'Khaimah, UAE. When shown a photograph of a street or public-'
+        'infrastructure issue, you respond with ONLY a valid JSON object — '
+        'no markdown fences, no prose, no preamble.\n'
+        '\n'
+        'The JSON must have exactly three keys:\n'
+        '  "category"    — string, MUST be one of EXACTLY these values '
+        '(case-sensitive, copy verbatim):\n'
+        '      $allowed | $kOtherCategory\n'
+        '  "severity"    — integer 1–10 (1 = cosmetic, 10 = immediate '
+        'danger to life)\n'
+        '  "description" — string, 1–2 factual sentences, max 280 '
+        'characters\n'
+        '\n'
+        'STRICT RULES:\n'
+        '  • Do not invent, abbreviate, pluralize, or rephrase categories. '
+        'Pick the single best match from the list above.\n'
+        '  • If the photo does not clearly fit any listed category, return '
+        '"$kOtherCategory" — never guess or fabricate a new category.\n'
+        '  • Synonyms map to canonical: "trash"/"rubbish" → "Litter '
+        'Accumulation"; "weeds"/"bushes" → "Overgrown Vegetation"; '
+        '"streetlight"/"lamppost" → "Broken Street Lights"; "pipe '
+        'burst"/"sewage" → "Broken Pipelines"; "tagging"/"spray paint" → '
+        '"Graffiti".\n'
+        '  • Return the JSON object only. No text outside it.';
+  }
 
   static const String _userInstruction =
       'Analyze this street-issue photograph and return the JSON object as instructed.';

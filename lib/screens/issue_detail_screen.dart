@@ -4,7 +4,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 
+import '../core/issue_categories.dart';
 import '../models/report_model.dart';
+import '../services/auth_service.dart';
 import '../services/database_service.dart';
 
 // ─── Local navy-green / olive / orange palette ──────────────────────────────
@@ -66,8 +68,31 @@ class _IssueDetailScreenState extends State<IssueDetailScreen> {
 
   bool get _isFixed => _currentStatus == ReportStatus.fixed;
   bool get _alreadyAssigned => _currentStatus == ReportStatus.inProgress;
-  bool get _volunteerLocked =>
-      widget.report.severity >= _kVolunteerLockSeverity;
+
+  /// City admins bypass every severity restriction; residents stay gated.
+  bool get _isCityAdmin =>
+      AuthService.instance.currentUser?.isCityAdmin ?? false;
+
+  /// Volunteer button is locked when a resident encounters either:
+  ///   • a high-severity issue (handled by municipal teams), OR
+  ///   • a category outside the volunteer-allowed set (Illegal Dumping,
+  ///     Overgrown Vegetation, Graffiti, Litter Accumulation).
+  /// Admins are never locked.
+  bool get _volunteerLocked {
+    if (_isCityAdmin) return false;
+    if (widget.report.severity >= _kVolunteerLockSeverity) return true;
+    return !isVolunteeringAllowed(widget.report.category);
+  }
+
+  /// Used to choose the banner copy — distinguishes "high severity" lockout
+  /// from "specialist category" lockout. Severity wins when both apply.
+  bool get _lockedBySeverity =>
+      !_isCityAdmin && widget.report.severity >= _kVolunteerLockSeverity;
+
+  /// "Mark as Fixed" is disabled for residents on issues with severity
+  /// higher than 5 (i.e. 6+). Admins can always mark fixed.
+  bool get _markFixedLocked =>
+      !_isCityAdmin && widget.report.severity > 5;
 
   Future<void> _confirmVolunteer() async {
     final confirmed = await showDialog<bool>(
@@ -263,27 +288,38 @@ class _IssueDetailScreenState extends State<IssueDetailScreen> {
               _StatusCard(status: _currentStatus),
               const SizedBox(height: 24),
               if (_volunteerLocked) ...[
-                const _OfficialMaintenanceBanner(),
+                _OfficialMaintenanceBanner(
+                  reason: _lockedBySeverity
+                      ? _LockReason.severity
+                      : _LockReason.specialistCategory,
+                ),
                 const SizedBox(height: 16),
               ],
-              _PrimaryActionButton(
-                label: _alreadyAssigned
-                    ? 'Already Assigned'
-                    : 'Check Volunteer Availability',
-                icon: Icons.handshake_outlined,
-                color: _kOliveMuted,
-                busy: _volunteering,
-                onTap: (_volunteerLocked || _alreadyAssigned || _isFixed)
-                    ? null
-                    : _confirmVolunteer,
-              ),
-              const SizedBox(height: 12),
+              // Hide the volunteer button entirely for non-allowed categories;
+              // for severity-locked items keep the disabled button visible so
+              // admins testing as residents understand the gating UX.
+              if (!_volunteerLocked || _lockedBySeverity) ...[
+                _PrimaryActionButton(
+                  label: _alreadyAssigned
+                      ? 'Already Assigned'
+                      : 'Check Volunteer Availability',
+                  icon: Icons.handshake_outlined,
+                  color: _kOliveMuted,
+                  busy: _volunteering,
+                  onTap: (_volunteerLocked || _alreadyAssigned || _isFixed)
+                      ? null
+                      : _confirmVolunteer,
+                ),
+                const SizedBox(height: 12),
+              ],
               _PrimaryActionButton(
                 label: _isFixed ? 'Already Fixed' : 'Mark as Fixed',
                 icon: Icons.check_circle_outline_rounded,
                 color: _kOrange,
                 busy: _markingFixed,
-                onTap: _isFixed ? null : _confirmMarkFixed,
+                onTap: (_isFixed || _markFixedLocked)
+                    ? null
+                    : _confirmMarkFixed,
               ),
             ],
           ),
@@ -633,11 +669,18 @@ class _StatusCard extends StatelessWidget {
 
 // ─── Official maintenance banner (severity guard) ─────────────────────────────
 
+enum _LockReason { severity, specialistCategory }
+
 class _OfficialMaintenanceBanner extends StatelessWidget {
-  const _OfficialMaintenanceBanner();
+  final _LockReason reason;
+  const _OfficialMaintenanceBanner({required this.reason});
 
   @override
   Widget build(BuildContext context) {
+    final body = reason == _LockReason.severity
+        ? 'High-severity tasks are restricted to RAK municipal teams.'
+        : 'This category requires specialist crews and tools — only '
+            'RAK municipal teams can take it on.';
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
@@ -652,14 +695,14 @@ class _OfficialMaintenanceBanner extends StatelessWidget {
           const SizedBox(width: 10),
           Expanded(
             child: RichText(
-              text: const TextSpan(
-                style: TextStyle(
+              text: TextSpan(
+                style: const TextStyle(
                   color: _kTextPrimary,
                   fontSize: 12.5,
                   height: 1.4,
                 ),
                 children: [
-                  TextSpan(
+                  const TextSpan(
                     text: 'Official Maintenance Only: ',
                     style: TextStyle(
                       color: _kOrange,
@@ -668,9 +711,8 @@ class _OfficialMaintenanceBanner extends StatelessWidget {
                     ),
                   ),
                   TextSpan(
-                    text:
-                        'High-severity tasks are restricted to RAK municipal teams.',
-                    style: TextStyle(color: _kTextSecondary),
+                    text: body,
+                    style: const TextStyle(color: _kTextSecondary),
                   ),
                 ],
               ),
