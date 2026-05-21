@@ -7,7 +7,9 @@ import 'package:flutter/material.dart';
 import '../models/ai_analysis_result.dart';
 import '../models/report_model.dart';
 import '../services/ai_service.dart' show AIService, GroqException;
-import '../services/database_service.dart' show DatabaseService;
+import '../services/auth_service.dart';
+import '../services/database_service.dart'
+    show DatabaseService, kExpRewardReportSubmitted;
 import '../services/location_service.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_buttons.dart';
@@ -125,8 +127,29 @@ class _AIPreviewScreenState extends State<AIPreviewScreen> {
     if (!mounted) return;
 
     if (ok) {
+      // EXP reward: +50 to the user who just filed the report.
+      //
+      // We push the new balance into AuthService synchronously (before
+      // popping) so the home screen's _BrandHeader picks it up on the
+      // next rebuild — no app restart, no log-out / log-in cycle.
+      //
+      // awardExp returns the authoritative post-increment value when the
+      // Mongo $inc + re-read both succeed. If the re-read fails (network
+      // hiccup, but the $inc itself almost certainly applied), we fall
+      // back to an OPTIMISTIC local increment so the chip still moves —
+      // the next home-screen refresh will converge on the real value.
+      final user = AuthService.instance.currentUser;
+      if (user != null) {
+        final newTotal = await DatabaseService.instance.awardExp(
+          username: user.username,
+          delta: kExpRewardReportSubmitted,
+        );
+        final resolved = newTotal ?? (user.currentExp + kExpRewardReportSubmitted);
+        AuthService.instance.updateCurrentExp(resolved);
+      }
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Report submitted. Thank you.')),
+        const SnackBar(content: Text('Report submitted. +50 EXP awarded.')),
       );
       Navigator.of(context)..pop()..pop();
       return;

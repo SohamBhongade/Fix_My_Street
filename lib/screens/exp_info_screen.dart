@@ -228,7 +228,15 @@ class _RewardsIntro extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final user = AuthService.instance.currentUser;
+    // Admins don't accumulate civic EXP — they verify and resolve, they
+    // don't earn from the gamification loop. Swap the balance line for a
+    // plain "Admin" label and drop the subtitle so the row reads
+    // unambiguously without leaving an empty-looking "0 EXP" tile.
+    final isAdmin = user?.isCityAdmin ?? false;
     final exp = user?.currentExp ?? 0;
+    final balanceLabel = isAdmin ? 'Admin' : '$exp EXP';
+    final subtitleLabel =
+        isAdmin ? 'Verifier account' : 'Your civic balance';
     return ClipRRect(
       borderRadius: BorderRadius.circular(AppRadius.md),
       child: BackdropFilter(
@@ -265,19 +273,24 @@ class _RewardsIntro extends StatelessWidget {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Text(
-                      'Your civic balance',
+                      subtitleLabel,
                       style: AppText.caption.copyWith(
                         color: AppColors.textSecondary,
                       ),
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      '$exp EXP',
+                      balanceLabel,
                       style: AppText.title.copyWith(
                         color: AppColors.olive,
                         fontSize: 22,
                         fontWeight: FontWeight.w700,
-                        fontFeatures: const [FontFeature.tabularFigures()],
+                        // Tabular figures only matter for the numeric EXP
+                        // form — for the "Admin" label they'd just add
+                        // unnecessary uniform spacing to a static word.
+                        fontFeatures: isAdmin
+                            ? const []
+                            : const [FontFeature.tabularFigures()],
                       ),
                     ),
                   ],

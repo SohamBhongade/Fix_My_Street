@@ -81,7 +81,7 @@ class _MapExploreScreenState extends State<MapExploreScreen> {
   Widget build(BuildContext context) {
     final topPad = MediaQuery.of(context).padding.top;
     final openCount =
-        _reports.where((r) => r.status != ReportStatus.fixed).length;
+        _reports.where((r) => r.status != ReportStatus.resolved).length;
 
     return Scaffold(
       backgroundColor: AppColors.bgBase,

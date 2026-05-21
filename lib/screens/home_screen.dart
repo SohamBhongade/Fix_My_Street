@@ -74,17 +74,28 @@ class _HomeScreenState extends State<HomeScreen> {
   /// Pulls the latest currentExp from the MongoDB users document so the
   /// header chip always reflects the live value. Cheap no-op if the user
   /// is logged out or the DB is unreachable.
+  ///
+  /// Always calls setState when the user is signed in — even if the DB
+  /// value matches the local cache. The reason: when an upstream flow
+  /// (ai_preview_screen, issue_detail_screen) optimistically updates
+  /// AuthService before this method runs, the values will match here,
+  /// and we still need to force a rebuild so the header chip picks up
+  /// the just-changed `AuthService.currentUser.currentExp`.
   Future<void> _refreshUserExp() async {
     final user = AuthService.instance.currentUser;
     if (user == null) return;
     try {
       final exp = await DatabaseService.instance
           .fetchOrSeedUserExp(user.username, user.currentExp);
-      if (!mounted || exp == user.currentExp) return;
-      AuthService.instance.updateCurrentExp(exp);
+      if (!mounted) return;
+      if (exp > user.currentExp) {
+        AuthService.instance.updateCurrentExp(exp);
+      }
       setState(() {});
     } catch (_) {
       // Stay on the cached value — login-time fetch already populated it.
+      // Still rebuild so any optimistic AuthService update lands on screen.
+      if (mounted) setState(() {});
     }
   }
 
@@ -105,6 +116,11 @@ class _HomeScreenState extends State<HomeScreen> {
       } catch (_) {
         // Polling will catch up.
       }
+      // Also pull the current user's EXP — the camera flow awards +50 on
+      // submit and an admin verifying a task may credit the volunteer
+      // +250. Re-reading here means the header chip reflects the new
+      // total the moment the user lands back on home, no restart needed.
+      await _refreshUserExp();
     });
   }
 

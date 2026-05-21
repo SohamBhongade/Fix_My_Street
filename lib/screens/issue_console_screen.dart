@@ -67,8 +67,8 @@ class _IssueConsoleScreenState extends State<IssueConsoleScreen> {
     try {
       final reports = await DatabaseService.instance.fetchReports();
       reports.sort((a, b) {
-        final aOpen = a.status != ReportStatus.fixed ? 0 : 1;
-        final bOpen = b.status != ReportStatus.fixed ? 0 : 1;
+        final aOpen = a.status != ReportStatus.resolved ? 0 : 1;
+        final bOpen = b.status != ReportStatus.resolved ? 0 : 1;
         if (aOpen != bOpen) return aOpen.compareTo(bOpen);
         if (a.severity != b.severity) return b.severity.compareTo(a.severity);
         return b.createdAt.compareTo(a.createdAt);
@@ -99,7 +99,7 @@ class _IssueConsoleScreenState extends State<IssueConsoleScreen> {
   @override
   Widget build(BuildContext context) {
     final openCount =
-        _reports.where((r) => r.status != ReportStatus.fixed).length;
+        _reports.where((r) => r.status != ReportStatus.resolved).length;
 
     return Scaffold(
       backgroundColor: _kBg,
@@ -495,13 +495,19 @@ class _StatusPill extends StatelessWidget {
   Widget build(BuildContext context) {
     Color color;
     switch (status) {
-      case ReportStatus.fixed:
+      case ReportStatus.resolved:
         color = _kMinor;
         break;
       case ReportStatus.inProgress:
         color = _kOrange;
         break;
-      case ReportStatus.pending:
+      case ReportStatus.pendingVerification:
+        // Amber-ish — distinct from in-progress orange and the resolved
+        // green, so admins can spot tasks awaiting their sign-off at a
+        // glance in the console list.
+        color = const Color(0xFFFFC857);
+        break;
+      case ReportStatus.open:
         color = _kOlive;
         break;
     }

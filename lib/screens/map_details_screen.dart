@@ -5,6 +5,7 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 
 import '../models/report_model.dart';
+import '../services/auth_service.dart';
 import '../services/database_service.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_buttons.dart';
@@ -70,21 +71,30 @@ class _MapDetailsScreenState extends State<MapDetailsScreen> {
 
     if (confirmed != true || !mounted) return;
 
+    final user = AuthService.instance.currentUser;
+    if (user == null) return;
+
     setState(() => _volunteering = true);
     try {
-      await DatabaseService.instance.updateReportStatus(
-        widget.report.id!,
-        ReportStatus.inProgress,
+      final updated = await DatabaseService.instance.volunteerForReport(
+        id: widget.report.id!,
+        user: user,
       );
       if (!mounted) return;
       setState(() {
-        _currentStatus = ReportStatus.inProgress;
+        _currentStatus = updated.status;
         _volunteering = false;
       });
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text("You've volunteered. The community thanks you."),
         ),
+      );
+    } on VerificationRuleException catch (e) {
+      if (!mounted) return;
+      setState(() => _volunteering = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(e.message)),
       );
     } catch (e) {
       if (!mounted) return;

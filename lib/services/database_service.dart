@@ -1,6 +1,7 @@
 import 'package:mongo_dart/mongo_dart.dart';
 
 import '../core/config.dart';
+import '../models/app_user.dart';
 import '../models/report_model.dart';
 
 class DatabaseException implements Exception {
@@ -9,6 +10,25 @@ class DatabaseException implements Exception {
   @override
   String toString() => message;
 }
+
+/// Thrown when the verification pipeline rejects an operation — e.g. an
+/// admin trying to volunteer for a high-severity task, or a non-admin
+/// trying to flip a task from `pending_verification` to `resolved`.
+///
+/// Distinct from [DatabaseException] so UI code can surface a "rule
+/// violation" message (orange, informative) rather than a generic
+/// "database error" toast.
+class VerificationRuleException implements Exception {
+  final String message;
+  const VerificationRuleException(this.message);
+  @override
+  String toString() => message;
+}
+
+/// Severity threshold above which a city admin cannot self-assign as a
+/// volunteer (Rule A in the verification pipeline spec). Severity > 3 —
+/// i.e. 4, 5, 6, …, 10 — is reserved for the public-works crews.
+const int kAdminVolunteerSeverityCap = 3;
 
 /// Singleton wrapper around MongoDB Atlas access for reports.
 class DatabaseService {
@@ -194,6 +214,82 @@ class DatabaseService {
     }
   }
 
+  /// Atomically increments [username]'s `currentExp` by [delta] in the
+  /// users collection and returns the new total. Used by the EXP
+  /// gamification hooks (+50 per report submitted, +250 per task that
+  /// transitions to resolved). Seeds the user document at [delta] if it
+  /// doesn't exist yet so brand-new accounts don't silently lose the
+  /// reward.
+  ///
+  /// Returns the **post-increment** value, or null if the database is
+  /// unreachable so callers can fall back to the cached in-memory value.
+  /// Wrapped in [_withReconnectRetry] for the same cold-boot resilience
+  /// as the other write paths.
+  Future<int?> awardExp({
+    required String username,
+    required int delta,
+  }) async {
+    if (delta == 0) return null;
+    if (username.trim().isEmpty) {
+      print('[DB] awardExp: refusing to write — empty username');
+      return null;
+    }
+
+    try {
+      return await _withReconnectRetry('awardExp', () async {
+        final col = await _usersCollection();
+
+        // Raw update document rather than ModifierBuilder. Two reasons:
+        //   1. Skips any subtle conversion bugs in the chained builder
+        //      when mixing `$inc` and `$setOnInsert` in one call.
+        //   2. Drops `$setOnInsert.username` — the selector already pins
+        //      the new doc's `username` on upsert, so writing it twice
+        //      is redundant and on some server configs raises a path
+        //      conflict.
+        //
+        // Schema this matches: { username: String, currentExp: Int,
+        // createdAt: ISO-8601 String } — same shape used by
+        // fetchOrSeedUserExp and the resident/admin seed paths.
+        final selector = <String, dynamic>{'username': username};
+        final update = <String, dynamic>{
+          r'$inc': <String, dynamic>{'currentExp': delta},
+          r'$setOnInsert': <String, dynamic>{
+            'createdAt': DateTime.now().toUtc().toIso8601String(),
+          },
+        };
+
+        print('[DB] awardExp → $username += $delta');
+        final result = await col.updateOne(
+          selector,
+          update,
+          upsert: true,
+        );
+        print('[DB] awardExp result — success: ${result.isSuccess}, '
+            'matched: ${result.nMatched}, '
+            'modified: ${result.nModified}, '
+            'upserted: ${result.nUpserted}');
+
+        if (!result.isSuccess) {
+          print('[DB] awardExp: write was not acknowledged successfully');
+          return null;
+        }
+
+        // Re-read the doc so callers get the authoritative post-increment
+        // value — mongo_dart's WriteResult does NOT surface the new field
+        // value for an $inc update.
+        final doc = await col.findOne(selector);
+        final raw = doc?['currentExp'];
+        final newTotal = raw is num ? raw.toInt() : null;
+        print('[DB] awardExp → $username new currentExp = $newTotal');
+        return newTotal;
+      });
+    } catch (e, st) {
+      print('[DB] awardExp($username, +$delta) FAILED — $e');
+      print('[DB] awardExp stack:\n$st');
+      return null;
+    }
+  }
+
   /// Persists a new report.
   ///
   /// Returns `true` on success, `false` on any connection or write failure.
@@ -367,7 +463,7 @@ class DatabaseService {
       final col = await _collection();
       final selector = where.sortBy('createdAt', descending: true);
       if (onlyPending) {
-        selector.eq('status', ReportStatus.pending.wire);
+        selector.eq('status', ReportStatus.open.wire);
       }
       final docs = await col.find(selector).toList();
       final reports = docs.map((d) => ReportModel.fromMap(d)).toList();
@@ -376,13 +472,33 @@ class DatabaseService {
     });
   }
 
-  /// Updates a report's status. Stamps `fixedAt` when status becomes `fixed`.
-  /// Wrapped in [_withReconnectRetry] for the same reason as [fetchReports].
+  /// Fetches a single report by id. Returns null when the document doesn't
+  /// exist. Used by the verification pipeline operations that need to
+  /// re-read the *current* server-side state of a report (severity,
+  /// assignee, proof URL) before applying a transition — never trust the
+  /// snapshot the UI was last rendered with.
+  Future<ReportModel?> fetchReportById(ObjectId id) {
+    return _withReconnectRetry('fetchReportById', () async {
+      final col = await _collection();
+      final doc = await col.findOne(where.id(id));
+      if (doc == null) return null;
+      return ReportModel.fromMap(doc);
+    });
+  }
+
+  /// Updates a report's status. Stamps `fixedAt` when status becomes
+  /// `resolved`. Wrapped in [_withReconnectRetry] for the same reason as
+  /// [fetchReports].
+  ///
+  /// This is a low-level setter that the verification pipeline methods
+  /// below build on — direct callers should prefer the role-aware methods
+  /// ([volunteerForReport], [submitProofOfWork], [adminVerifyAndResolve])
+  /// so the spec'd rules are enforced.
   Future<bool> updateReportStatus(ObjectId id, ReportStatus status) {
     return _withReconnectRetry('updateReportStatus', () async {
       final col = await _collection();
       final update = modify.set('status', status.wire);
-      if (status == ReportStatus.fixed) {
+      if (status == ReportStatus.resolved) {
         update.set('fixedAt', DateTime.now().toUtc().toIso8601String());
       } else {
         update.unset('fixedAt');
@@ -391,4 +507,197 @@ class DatabaseService {
       return result.isSuccess && (result.nModified > 0 || result.nMatched > 0);
     });
   }
+
+  // ───────────────────────────────────────────────────────────────────────
+  // Verification pipeline (Rules A + B)
+  //
+  // The methods below are the ONLY blessed transitions for the open →
+  // in_progress → pending_verification → resolved lifecycle. They all
+  // re-read the report from Mongo before mutating so the server-side
+  // severity / status / proof URL is the source of truth, not whatever
+  // stale copy the UI held when the user tapped.
+  // ───────────────────────────────────────────────────────────────────────
+
+  /// Rule A — Admin Volunteer Restriction.
+  ///
+  /// Assigns [user] as the volunteer for the report identified by [id] and
+  /// transitions its status to `in_progress`. If [user] has the admin role
+  /// AND the report's `severity > 3`, the assignment is blocked with a
+  /// [VerificationRuleException] carrying the spec'd error string —
+  /// "Admins are restricted from volunteering for high-severity tasks
+  /// (above Priority 3)." No write occurs in that case.
+  ///
+  /// Also refuses to overwrite an already-assigned task (idempotent guard).
+  Future<ReportModel> volunteerForReport({
+    required ObjectId id,
+    required AppUser user,
+  }) async {
+    final report = await fetchReportById(id);
+    if (report == null) {
+      throw const DatabaseException('Report not found.');
+    }
+
+    if (user.isCityAdmin && report.severity > kAdminVolunteerSeverityCap) {
+      throw const VerificationRuleException(
+        'Admins are restricted from volunteering for high-severity tasks '
+        '(above Priority 3).',
+      );
+    }
+
+    if (report.status != ReportStatus.open &&
+        report.status != ReportStatus.inProgress) {
+      throw VerificationRuleException(
+        'This task is "${report.status.label}" and cannot be re-volunteered.',
+      );
+    }
+    if (report.assignedVolunteerId != null &&
+        report.assignedVolunteerId != user.username &&
+        report.status == ReportStatus.inProgress) {
+      throw const VerificationRuleException(
+        'This task is already assigned to another volunteer.',
+      );
+    }
+
+    return _withReconnectRetry('volunteerForReport', () async {
+      final col = await _collection();
+      final update = modify
+          .set('status', ReportStatus.inProgress.wire)
+          .set('assignedVolunteerId', user.username);
+      final result = await col.updateOne(where.id(id), update);
+      if (!result.isSuccess ||
+          (result.nMatched == 0 && result.nModified == 0)) {
+        throw const DatabaseException('Failed to assign volunteer.');
+      }
+      return report.copyWith(
+        status: ReportStatus.inProgress,
+        assignedVolunteerId: user.username,
+      );
+    });
+  }
+
+  /// Rule B (first half) — Volunteer Submits Proof.
+  ///
+  /// Saves [proofImageUrl] to the report and flips status to
+  /// `pending_verification`. Refuses the call when:
+  ///   • the report isn't currently `in_progress` (you can't submit proof
+  ///     for something that hasn't been started),
+  ///   • [submittingUser] isn't the assigned volunteer (admins included —
+  ///     an admin who wants to fast-track must volunteer first), or
+  ///   • [proofImageUrl] is empty / null.
+  Future<ReportModel> submitProofOfWork({
+    required ObjectId id,
+    required AppUser submittingUser,
+    required String proofImageUrl,
+  }) async {
+    if (proofImageUrl.trim().isEmpty) {
+      throw const VerificationRuleException(
+        'A proof-of-work image is required before submitting for verification.',
+      );
+    }
+
+    final report = await fetchReportById(id);
+    if (report == null) {
+      throw const DatabaseException('Report not found.');
+    }
+
+    if (report.status != ReportStatus.inProgress) {
+      throw VerificationRuleException(
+        'Only tasks that are "In Progress" can submit proof — this one is '
+        '"${report.status.label}".',
+      );
+    }
+    if (report.assignedVolunteerId == null ||
+        report.assignedVolunteerId != submittingUser.username) {
+      throw const VerificationRuleException(
+        'Only the assigned volunteer can submit completion proof for this task.',
+      );
+    }
+
+    return _withReconnectRetry('submitProofOfWork', () async {
+      final col = await _collection();
+      final update = modify
+          .set('status', ReportStatus.pendingVerification.wire)
+          .set('proofOfWorkImageUrl', proofImageUrl);
+      final result = await col.updateOne(where.id(id), update);
+      if (!result.isSuccess ||
+          (result.nMatched == 0 && result.nModified == 0)) {
+        throw const DatabaseException('Failed to record proof of work.');
+      }
+      return report.copyWith(
+        status: ReportStatus.pendingVerification,
+        proofOfWorkImageUrl: proofImageUrl,
+      );
+    });
+  }
+
+  /// Rule B (second half) — Admin Verifies & Resolves.
+  ///
+  /// Only callable by an admin, only when the report is in
+  /// `pending_verification`, and only when `proofOfWorkImageUrl` is
+  /// populated (i.e. the admin had something to actually inspect). Stamps
+  /// `fixedAt` for the resolved-time ledger.
+  Future<ReportModel> adminVerifyAndResolve({
+    required ObjectId id,
+    required AppUser admin,
+  }) async {
+    if (!admin.isCityAdmin) {
+      throw const VerificationRuleException(
+        'Only admins can verify and resolve a task.',
+      );
+    }
+
+    final report = await fetchReportById(id);
+    if (report == null) {
+      throw const DatabaseException('Report not found.');
+    }
+
+    if (report.status != ReportStatus.pendingVerification) {
+      throw VerificationRuleException(
+        'Only tasks in "Pending Verification" can be resolved — this one is '
+        '"${report.status.label}".',
+      );
+    }
+    final proof = report.proofOfWorkImageUrl;
+    if (proof == null || proof.isEmpty) {
+      throw const VerificationRuleException(
+        'Cannot resolve: the volunteer has not uploaded a proof-of-work image yet.',
+      );
+    }
+
+    final resolved = await _withReconnectRetry('adminVerifyAndResolve',
+        () async {
+      final col = await _collection();
+      final update = modify
+          .set('status', ReportStatus.resolved.wire)
+          .set('fixedAt', DateTime.now().toUtc().toIso8601String());
+      final result = await col.updateOne(where.id(id), update);
+      if (!result.isSuccess ||
+          (result.nMatched == 0 && result.nModified == 0)) {
+        throw const DatabaseException('Failed to mark task resolved.');
+      }
+      return report.copyWith(
+        status: ReportStatus.resolved,
+        fixedAt: DateTime.now().toUtc(),
+      );
+    });
+
+    // EXP reward: +250 EXP to the volunteer whose work was just verified.
+    // Best-effort — a failure to increment shouldn't roll back the
+    // resolution; the next login / home refresh will catch any drift
+    // because awardExp re-reads the doc and fetchOrSeedUserExp converges
+    // on the persisted value.
+    final volunteer = resolved.assignedVolunteerId;
+    if (volunteer != null && volunteer.isNotEmpty) {
+      await awardExp(username: volunteer, delta: kExpRewardResolve);
+    }
+
+    return resolved;
+  }
 }
+
+/// EXP awarded to the resident who submits a new report. Spec value: +50.
+const int kExpRewardReportSubmitted = 50;
+
+/// EXP awarded to the volunteer when a task they handled transitions to
+/// `resolved` (i.e. admin verified their proof of work). Spec value: +250.
+const int kExpRewardResolve = 250;
