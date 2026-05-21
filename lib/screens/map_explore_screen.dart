@@ -109,7 +109,17 @@ class _MapExploreScreenState extends State<MapExploreScreen> {
                       point: LatLng(r.latitude, r.longitude),
                       width: dotSize,
                       height: dotSize,
+                      // HitTestBehavior.opaque so the FULL marker box is
+                      // tappable — not just the inner visible dot. Without
+                      // this, Moderate/Minor pins (whose visible dot is
+                      // ~45% of the marker size, with empty space around
+                      // it) only fired onTap when the user landed
+                      // directly on the tiny inner circle. Critical pins
+                      // worked by accident because their pulse ring fills
+                      // the marker bounds. Opaque hit-testing makes the
+                      // tap target consistent across every severity.
                       child: GestureDetector(
+                        behavior: HitTestBehavior.opaque,
                         onTap: () => _showSheet(r),
                         child: SeverityDot(severity: r.severity),
                       ),

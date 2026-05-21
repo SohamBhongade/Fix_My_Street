@@ -4,6 +4,7 @@ import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 
+import '../core/issue_categories.dart';
 import '../models/ai_analysis_result.dart';
 import '../models/report_model.dart';
 import '../services/ai_service.dart' show AIService, GroqException;
@@ -16,23 +17,12 @@ import '../widgets/app_buttons.dart';
 import '../widgets/severity_indicator.dart';
 import '../widgets/surface_card.dart';
 
-const Map<String, int> _categorySeverity = {
-  'Exposed Wiring': 10,
-  'Broken Pipelines': 10,
-  'Potholes': 8,
-  'Traffic Signal Malfunction': 8,
-  'Broken Guardrails': 7,
-  'Broken Street Lights': 6,
-  'Water Accumulation': 5,
-  'Cracked Sidewalks': 5,
-  'Illegal Dumping': 5,
-  'Overflowing Bins': 4,
-  'Overgrown Vegetation': 4,
-  'Broken Signs': 3,
-  'Faded Road Markings': 3,
-  'Litter Accumulation': 2,
-  'Graffiti': 1,
-};
+// Severity for the manual-classification dropdown comes from the canonical
+// category → severity map in lib/core/issue_categories.dart. Keeping a
+// single source of truth across the AI prompt, the manual dropdown, and
+// the persistence layer is what guarantees Litter Accumulation /
+// Overgrown Vegetation / Graffiti always land at 1 / 2 / 3.
+const Map<String, int> _categorySeverity = kCanonicalCategorySeverity;
 
 String _priorityLabelFor(int severity) {
   if (severity >= 8) return 'Critical';

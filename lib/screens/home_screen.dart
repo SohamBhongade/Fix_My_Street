@@ -490,6 +490,13 @@ class _MapHeroCard extends StatelessWidget {
                         point: LatLng(r.latitude, r.longitude),
                         width: dotSize,
                         height: dotSize,
+                        // HitTestBehavior.opaque — every pin gets the full
+                        // marker box as a tap target, regardless of
+                        // severity. The inner SeverityDot only paints
+                        // ~45% of the marker for Minor/Moderate; without
+                        // opaque hit-testing, taps on the surrounding
+                        // empty space would fall through and the report
+                        // detail sheet would never open.
                         child: GestureDetector(
                           behavior: HitTestBehavior.opaque,
                           onTap: () => onMarkerTap(r),

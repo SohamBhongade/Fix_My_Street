@@ -10,7 +10,8 @@
       "PowerShell(flutter analyze *)",
       "PowerShell(Get-ChildItem lib -Recurse -File | ForEach-Object { $_.FullName })",
       "PowerShell($pkg = \\(Get-Content C:\\\\Users\\\\soham\\\\Desktop\\\\FIX_MY_STREEET_NEW\\\\fix_my_street\\\\pubspec.lock | Select-String \"mongo_dart\" | Select-Object -First 1\\); $pkg)",
-      "Bash(git check-ignore *)"
+      "Bash(git check-ignore *)",
+      "Bash(git commit *)"
     ]
   }
 }

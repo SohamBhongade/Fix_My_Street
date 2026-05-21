@@ -34,7 +34,10 @@ class _MapDetailsScreenState extends State<MapDetailsScreen> {
   }
 
   bool get _alreadyAssigned => _currentStatus == ReportStatus.inProgress;
-  bool get _requiresProfessional => widget.report.severity >= 4;
+  // Severity > 3 is the universal volunteer guardrail — no role (resident
+  // or admin) can self-assign these. The action panel hides the button
+  // entirely and shows the municipal-only banner instead.
+  bool get _requiresProfessional => widget.report.severity > 3;
 
   Future<void> _volunteer() async {
     final confirmed = await showDialog<bool>(
@@ -239,12 +242,13 @@ class _MapDetailsScreenState extends State<MapDetailsScreen> {
           const SizedBox(width: 10),
           Expanded(
             child: Text(
-              'Professional repair required — authorities have been notified.',
+              'This is a high-severity critical issue. Please leave it to '
+              'the municipal team.',
               style: AppText.caption.copyWith(
                 color: AppColors.critical,
                 fontWeight: FontWeight.w500,
               ),
-              maxLines: 2,
+              maxLines: 3,
               overflow: TextOverflow.ellipsis,
             ),
           ),

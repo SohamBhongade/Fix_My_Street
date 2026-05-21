@@ -65,11 +65,46 @@ class _IssueDetailScreenState extends State<IssueDetailScreen> {
   bool _volunteering = false;
   bool _submittingProof = false;
   bool _verifying = false;
+  // True while a server refresh of [_report] is in flight. Drives the
+  // small spinner in the AppBar so the user can tell whether the values
+  // on screen are still being reconciled with Mongo.
+  bool _refreshing = false;
 
   @override
   void initState() {
     super.initState();
     _report = widget.report;
+    // Severity (and status/assignee/proof URL) can drift between when the
+    // caller fetched the list and when the user actually opens the
+    // detail screen — admin edits, other volunteers picking up the task,
+    // or the canonical-severity normalizer on the server side. Re-pull
+    // the document from Mongo on mount so the AI Classification card,
+    // severity chip, and action panel render against the live value
+    // instead of the stale snapshot passed in via the constructor.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _refreshFromServer();
+    });
+  }
+
+  /// Re-reads the report from Mongo by `_id` and rebuilds with the fresh
+  /// document. No-op when the report hasn't been persisted yet (id null)
+  /// or when the fetch fails — in either case we keep showing whatever we
+  /// already have rather than blanking the UI.
+  Future<void> _refreshFromServer() async {
+    final id = _report.id;
+    if (id == null) return;
+    if (mounted) setState(() => _refreshing = true);
+    try {
+      final fresh = await DatabaseService.instance.fetchReportById(id);
+      if (!mounted) return;
+      setState(() {
+        if (fresh != null) _report = fresh;
+        _refreshing = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _refreshing = false);
+    }
   }
 
   AppUser? get _user => AuthService.instance.currentUser;
@@ -79,9 +114,10 @@ class _IssueDetailScreenState extends State<IssueDetailScreen> {
       _report.assignedVolunteerId != null &&
       _report.assignedVolunteerId == _user!.username;
 
-  /// Rule A: admins cannot volunteer when severity > 3.
-  bool get _adminSeverityLocked =>
-      _isAdmin && _report.severity > kAdminVolunteerSeverityCap;
+  /// High-severity guardrail. Severity > 3 locks the volunteer action for
+  /// every role — residents AND admins alike — and the action panel is
+  /// rebuilt to show the municipal-only notice instead of the button.
+  bool get _severityLocked => _report.severity > kVolunteerSeverityCap;
 
   // ─── Actions ──────────────────────────────────────────────────────────
 
@@ -320,23 +356,45 @@ class _IssueDetailScreenState extends State<IssueDetailScreen> {
             fontWeight: FontWeight.w600,
           ),
         ),
+        actions: [
+          IconButton(
+            tooltip: 'Refresh',
+            onPressed: _refreshing ? null : _refreshFromServer,
+            icon: _refreshing
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(
+                      color: _kOlive,
+                      strokeWidth: 2,
+                    ),
+                  )
+                : const Icon(Icons.refresh_rounded, color: _kTextPrimary),
+          ),
+        ],
       ),
       body: SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              _ImagePanel(report: r),
-              const SizedBox(height: 16),
-              _ClassificationCard(report: r),
-              const SizedBox(height: 16),
-              _LocationCard(report: r),
-              const SizedBox(height: 16),
-              _StatusCard(status: r.status),
-              const SizedBox(height: 24),
-              ..._buildActionPanel(),
-            ],
+        child: RefreshIndicator(
+          color: _kOlive,
+          backgroundColor: _kSurfaceHigh,
+          onRefresh: _refreshFromServer,
+          child: SingleChildScrollView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                _ImagePanel(report: r),
+                const SizedBox(height: 16),
+                _ClassificationCard(report: r),
+                const SizedBox(height: 16),
+                _LocationCard(report: r),
+                const SizedBox(height: 16),
+                _StatusCard(status: r.status),
+                const SizedBox(height: 24),
+                ..._buildActionPanel(),
+              ],
+            ),
           ),
         ),
       ),
@@ -407,7 +465,9 @@ class _IssueDetailScreenState extends State<IssueDetailScreen> {
     final r = _report;
     final alreadyAssigned = r.status == ReportStatus.inProgress;
 
-    if (_adminSeverityLocked) {
+    // Severity > 3 → no volunteer button rendered at all (for any role),
+    // replaced by the municipal-only notice.
+    if (_severityLocked) {
       return const [
         _HighPriorityReservedBanner(),
       ];
@@ -794,7 +854,8 @@ class _HighPriorityReservedBanner extends StatelessWidget {
           SizedBox(width: 10),
           Expanded(
             child: Text(
-              'High-priority task reserved for public works.',
+              'This is a high-severity critical issue. Please leave it to '
+              'the municipal team.',
               style: TextStyle(
                 color: _kTextPrimary,
                 fontSize: 13,

@@ -1,6 +1,7 @@
 import 'package:mongo_dart/mongo_dart.dart';
 
 import '../core/config.dart';
+import '../core/issue_categories.dart';
 import '../models/app_user.dart';
 import '../models/report_model.dart';
 
@@ -25,10 +26,17 @@ class VerificationRuleException implements Exception {
   String toString() => message;
 }
 
-/// Severity threshold above which a city admin cannot self-assign as a
-/// volunteer (Rule A in the verification pipeline spec). Severity > 3 —
-/// i.e. 4, 5, 6, …, 10 — is reserved for the public-works crews.
+/// Severity threshold above which NO user — resident or admin — can
+/// volunteer. Anything strictly greater than 3 (i.e. 4, 5, 6, …, 10) is
+/// a high-severity critical issue reserved for municipal public-works
+/// crews. The constant retains its old `Admin*` name for source-level
+/// compatibility but the rule now applies to every role.
 const int kAdminVolunteerSeverityCap = 3;
+
+/// Public alias — preferred in new code. Same value as
+/// [kAdminVolunteerSeverityCap]; renamed so the universality of the
+/// guardrail is obvious at call sites.
+const int kVolunteerSeverityCap = kAdminVolunteerSeverityCap;
 
 /// Singleton wrapper around MongoDB Atlas access for reports.
 class DatabaseService {
@@ -308,11 +316,18 @@ class DatabaseService {
       }
 
       final id = report.id ?? ObjectId();
+      // Reconcile severity against the canonical category → severity map
+      // before persistence. This is the chokepoint that guarantees
+      // Litter Accumulation / Overgrown Vegetation / Graffiti always land
+      // at 1 / 2 / 3 regardless of what the AI returned or what the UI
+      // submitted — so volunteer permissions stay consistent with Rule A.
+      final canonicalSeverity =
+          normalizeSeverityFor(report.category, report.severity);
       final payload = <String, dynamic>{
         '_id': id,
         'category': report.category,
-        'severity': report.severity,
-        'priority': report.priority.wire,
+        'severity': canonicalSeverity,
+        'priority': ReportPriority.fromSeverity(canonicalSeverity).wire,
         'description': report.description,
         'latitude': report.latitude,
         'longitude': report.longitude,
@@ -537,10 +552,13 @@ class DatabaseService {
       throw const DatabaseException('Report not found.');
     }
 
-    if (user.isCityAdmin && report.severity > kAdminVolunteerSeverityCap) {
+    // High-severity guardrail — applies to EVERY role, not just admins.
+    // Severity > 3 is reserved for municipal public-works crews; even
+    // city admins cannot self-assign these tasks.
+    if (report.severity > kVolunteerSeverityCap) {
       throw const VerificationRuleException(
-        'Admins are restricted from volunteering for high-severity tasks '
-        '(above Priority 3).',
+        'This is a high-severity critical issue. Please leave it to the '
+        'municipal team.',
       );
     }
 
