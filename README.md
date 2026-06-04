@@ -21,8 +21,8 @@
 - **Framework:** [Flutter](https://flutter.dev/) (Cross-platform UI Toolkit)
 - **Language:** [Dart](https://dart.dev/)
 - **Native Integrations:** C++, Swift, and C (for high-performance map rendering and native platform channel bridges)
-- **Maps API:** Google Maps Flutter plugin / Mapbox (or specify if using OpenStreetMap)
-- **State Management:** *[e.g., Provider / Bloc / Riverpod - change this to match your implementation]*
+- **Maps API:** Open Street Map
+- **Databas:** MongoDB
 
 ---
 
