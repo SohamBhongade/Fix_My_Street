@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/images/hero.jpg" alt="FixMyStreet AI — civic intelligence for Ras Al Khaimah" width="100%">
+  <img src="docs/images/banner.jpg" alt="FixMyStreet AI — civic intelligence for Ras Al Khaimah" width="100%">
 </p>
 
 <p align="center">
