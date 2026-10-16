@@ -9,7 +9,6 @@
   <img src="https://img.shields.io/badge/Inference-Groq-F55036" alt="Groq">
   <img src="https://img.shields.io/badge/Database-MongoDB%20Atlas-47A248?logo=mongodb&logoColor=white" alt="MongoDB Atlas">
   <img src="https://img.shields.io/badge/Maps-flutter__map%20%2B%20CARTO-A8B870" alt="flutter_map">
-  <img src="https://img.shields.io/badge/Built%20with-Claude%20Code-D97757" alt="Built with Claude Code">
 </p>
 
 <h3 align="center">Every phone becomes a municipal sensor.<br>Every report becomes a work order.<br>Every resident becomes part of the repair crew.</h3>
@@ -34,7 +33,7 @@ That first step starts a **closed-loop civic system**:
 > **Snap → Classify → Map → Volunteer → Prove → Verify → Reward.**
 > One tap starts it. The city's live picture updates every three seconds.
 
-Built in Flutter for Ras Al Khaimah, UAE, with [Claude Code](#-built-with-claude-code) as an AI pair-programmer.
+Built in Flutter for Ras Al Khaimah, UAE.
 
 ---
 
@@ -56,7 +55,6 @@ Built in Flutter for Ras Al Khaimah, UAE, with [Claude Code](#-built-with-claude
 - [Tech stack](#-tech-stack)
 - [Project structure](#-project-structure)
 - [Getting started](#-getting-started)
-- [Built with Claude Code](#-built-with-claude-code)
 - [Roadmap](#-roadmap)
 - [Team](#-team)
 
@@ -383,7 +381,7 @@ To add or change a category, edit **one file**: `lib/core/issue_categories.dart`
 | Maps | `flutter_map` · `latlong2` · CARTO tiles | Live severity-coded civic map |
 | Media | `image_picker` | Camera and gallery capture |
 | Formatting | `intl` | Timestamps and locale-aware formatting |
-| Dev tooling | **Claude Code**, `flutter analyze`, `flutter_lints` | AI pair-programming and static analysis |
+| Dev tooling | `flutter analyze`, `flutter_lints` | Static analysis |
 
 ---
 
@@ -425,6 +423,8 @@ fix_my_street/
 ---
 
 ## 🚀 Getting started
+
+> **Just want to try it?** Download the APK and install it on your Android device.
 
 ### Prerequisites
 
@@ -476,35 +476,6 @@ flutter run
 | City Admin | `CityAdmin` | `12345` |
 
 > These are hard-coded **prototype credentials** for demos only. See the [Roadmap](#-roadmap) for real authentication.
-
----
-
-## 🤖 Built with Claude Code
-
-FixMyStreet AI was built with **[Claude Code](https://claude.com/claude-code)**, Anthropic's agentic coding tool, working as a pair-programmer in the terminal. It read the codebase, proposed and wrote changes, ran `flutter pub` and `flutter analyze` to check them, and committed the results. Commits it co-authored carry a `Co-Authored-By: Claude` trailer in the git history.
-
-### Development log
-
-| Date | Milestone |
-|---|---|
-| 11 May 2026 | 🧱 **The Great Reset**: clean architecture initialized; first build with Llama 4 and MongoDB |
-| 12 May 2026 | 🎯 Smarter manual-classification dropdown and loading-state polish |
-| 13 May 2026 | 🗺️ Live RAK map markers and a new formal UI theme |
-| 13 May 2026 | 🛡️ Hardened MongoDB submission with auto-reconnect logic |
-| 14 May 2026 | 📶 Live connectivity status badge on the home screen |
-| 19 May 2026 | ⏱️ Fixed the startup race condition; tuned Atlas connection parameters |
-| 21 May 2026 | ⚖️ Dual-rule volunteer pipeline, EXP gamification, admin profile fix |
-| 21 May 2026 | 🧠 Canonical issue taxonomy, AI preview, map and detail screen upgrades |
-
-### Engineering decisions made in those sessions
-
-These problems surfaced during development and were solved in pairing sessions with Claude Code. Each fix is explained in comments in the source.
-
-- **`State.OPENING` race at boot.** Two code paths opened the same `Db` at the same time. The fix was a shared handshake future plus blocking the handshake before `runApp()`.
-- **"No master connection" flood.** The polling loop kept hitting a dead socket every tick. It now checks the connection before each fetch and backs off when it's down.
-- **AI severity drift.** The model can rate litter as Moderate (the demo shows a 4/10), which would lock residents out of an easy fix. This led to the canonical severity map and `normalizeSeverityFor()`, which run once at the point of persistence.
-- **Category drift.** A free-text model can invent its own labels. The fix was a runtime-generated allow-list, a synonym table and an explicit `Other` escape hatch with manual fallback.
-- **Trusting the client.** Every state transition re-reads the report from Atlas before mutating it, so rules are checked against the server copy rather than the snapshot on screen.
 
 ---
 
